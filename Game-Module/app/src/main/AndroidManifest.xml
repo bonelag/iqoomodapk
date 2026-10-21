@@ -6,13 +6,13 @@
     <uses-permission android:name="io.github.vivogameunlock.permission.CONFIG" />
     <application android:label="Vivo Game Unlock" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:supportsRtl="true" android:directBootAware="false">
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="PD2507: mở MEMC/VSR/VAA cho game ngoài whitelist. Giữ kiểm tra phần cứng và nhiệt độ." />
+        <meta-data android:name="xposeddescription" android:value="PD2507: mở MEMC/VSR cho game ngoài whitelist. Giữ kiểm tra phần cứng và nhiệt độ." />
         <meta-data android:name="xposedminversion" android:value="82" />
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
-        <provider android:name=".ConfigProvider" android:authorities="io.github.vivogameunlock.config" android:exported="true" android:grantUriPermissions="false" />
-        <receiver android:name=".ConfigRequestReceiver" android:exported="true" android:permission="android.permission.DUMP" />
+        <provider android:name=".ConfigProvider" android:directBootAware="true" android:authorities="io.github.vivogameunlock.config" android:exported="true" android:grantUriPermissions="false" />
+        <receiver android:name=".ConfigRequestReceiver" android:directBootAware="true" android:exported="true" android:permission="android.permission.DUMP" />
     </application>
 </manifest>

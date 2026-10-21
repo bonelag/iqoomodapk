@@ -23,7 +23,6 @@ public final class GameUnlock implements IXposedHookLoadPackage {
     private final Map<String, Integer> frameTargets = new HashMap<>();
     private final Set<String> genericOverheat = Collections.synchronizedSet(new HashSet<>());
     private final Map<Object, Object> resolutionStrategies = Collections.synchronizedMap(new WeakHashMap<>());
-    private final ThreadLocal<Boolean> stockAdmission = new ThreadLocal<>();
     private final ClassLoader loader;
     private final String process;
 
@@ -103,7 +102,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
     }
     private boolean allowed(String pkg, String feature) {
         Policy cfg = state.policy();
-        return cfg.allows(pkg) && ("memc".equals(feature) ? cfg.memc : "vsr".equals(feature) ? cfg.vsr : cfg.vaa);
+        return cfg.allows(pkg) && ("memc".equals(feature) ? cfg.memc : "vsr".equals(feature) && cfg.vsr);
     }
     private String foreground() {
         try {
@@ -151,18 +150,14 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         hook("com.vivo.gameassistant.superresolution.m", "f", new Object[]{String.class}, null, p -> {
             if (allowed((String)p.args[0], "vsr")) p.setResult(true);
         });
-        hook("com.vivo.common.utils.f0", "j", new Object[]{Context.class, String.class}, null, p -> {
-            if (allowed((String)p.args[1], "vaa")) p.setResult(true);
-        });
+        hook("com.vivo.common.utils.f0", "j", new Object[]{Context.class, String.class}, null, p -> p.setResult(false));
 
         // Virtual read results only: never overwrite system whitelist Settings.
         hook(Settings.Global.class, "getString", new Object[]{ContentResolver.class, String.class}, null, p -> {
             String key = (String)p.args[1];
-            if (Boolean.TRUE.equals(stockAdmission.get())) return;
             if (!state.policy().enabled || key == null || state.packages().isEmpty()) return;
             boolean add = (state.policy().vsr && VSR_KEYS.contains(key))
-                    || (state.policy().memc && MEMC_KEYS.contains(key))
-                    || (state.policy().vaa && VAA_KEYS.contains(key));
+                    || (state.policy().memc && MEMC_KEYS.contains(key));
             if (add) {
                 String original = (String)p.getResult();
                 p.setResult(original == null || original.isEmpty() ? state.packages() : original + ";" + state.packages());
@@ -301,104 +296,17 @@ public final class GameUnlock implements IXposedHookLoadPackage {
             p.setResult(success);
         }, null);
         hook("com.vivo.gameassistant.homegui.sideslide.panels.qchip.CommonSuperResolutionFrameView", "c",
-                new Object[]{Context.class}, null, p -> addVaaControl((android.view.View)p.thisObject));
-        hook(sr, "t1", new Object[]{int.class, boolean.class}, null, p ->
-                log(process + " VAA_REQUEST pkg=" + foreground() + " state=" + p.args[0]));
+                new Object[]{Context.class}, null, p -> hideVaaControl((android.view.View)p.thisObject));
         hook(sr, "v1", new Object[]{Context.class, String.class, boolean.class, boolean.class}, null, p -> {
             if (directResolution((String)p.args[1]))
                 log(process + " VSR_COMMAND pkg=" + p.args[1] + " enabled=" + p.args[2] + " accepted=" + p.getResult());
         });
     }
 
-    private void addVaaControl(android.view.View panel) throws Throwable {
-        Context ctx = panel.getContext();
-        String pkg = foreground();
-        if (!allowed(pkg, "vaa")) return;
-        // Preserve the vendor's SDK-specific UI for games that originally supported VAA.
-        Method admission = XposedHelpers.findMethodExact(XposedHelpers.findClass(
-                "com.vivo.common.utils.f0", loader), "j", Context.class, String.class);
-        boolean stockVaa;
-        stockAdmission.set(true);
-        try { stockVaa = Boolean.TRUE.equals(XposedBridge.invokeOriginalMethod(admission, preferences(), new Object[]{ctx, pkg})); }
-        finally { stockAdmission.remove(); }
-        if (stockVaa) return;
-        boolean gles = Boolean.TRUE.equals(XposedHelpers.callStaticMethod(XposedHelpers.findClass(
-                "android.os.SystemProperties", loader), "getBoolean", "sys.game.vaa.gles.enable", false));
-        if (!gles) return;
-        android.widget.LinearLayout content = (android.widget.LinearLayout)XposedHelpers.getObjectField(panel, "f");
-        if (content.findViewWithTag("vgu.vaa") != null) return;
-        int originalRowId = ctx.getResources().getIdentifier("cl_vaa", "id", ctx.getPackageName());
-        android.view.View originalRow = originalRowId == 0 ? null : panel.findViewById(originalRowId);
-        if (originalRow != null) originalRow.setVisibility(android.view.View.GONE);
-        // Inflate the host's own XML, detach only its VAA row, and discard the
-        // unattached preview/radio controls. No OEM presenter/SDK listener is created.
-        int layoutId = ctx.getResources().getIdentifier("layout_qchip_super_frame", "layout", ctx.getPackageName());
-        android.view.View template = android.view.LayoutInflater.from(ctx).inflate(layoutId, null, false);
-        android.view.View section = template.findViewById(originalRowId);
-        if (section == null) throw new IllegalStateException("OEM VAA row missing");
-        ((android.view.ViewGroup)section.getParent()).removeView(section);
-        section.setTag("vgu.vaa");
-        android.view.View toggle = section.findViewById(ctx.getResources().getIdentifier("sw_vaa", "id", ctx.getPackageName()));
-        android.widget.Checkable checked = (android.widget.Checkable)toggle;
-        android.widget.TextView title = section.findViewById(ctx.getResources().getIdentifier("tv_vaa", "id", ctx.getPackageName()));
-        title.setText("Khử răng cưa");
-        title.setMaxLines(1);
-        Object tint = XposedHelpers.callStaticMethod(XposedHelpers.findClass("com.vivo.gameassistant.utils.d0", loader), "a");
-        XposedHelpers.callMethod(tint, "b", toggle, true);
-        android.view.View help = section.findViewById(ctx.getResources().getIdentifier("iv_vaa", "id", ctx.getPackageName()));
-        help.setContentDescription("Thông tin khử răng cưa");
-        help.setOnClickListener(view -> android.widget.Toast.makeText(ctx,
-                "com.miHoYo.GenshinImpact".equals(pkg)
-                        ? "ROM này không hỗ trợ VAA trên Vulkan. Công tắc không có tác dụng nếu Genshin dùng Vulkan."
-                        : "VAA chỉ có tác dụng khi game tương thích. Công tắc lưu yêu cầu, không xác nhận khử răng cưa đã chạy.",
-                android.widget.Toast.LENGTH_LONG).show());
-        Runnable refresh = () -> {
-            try {
-                checked.setChecked((Integer)XposedHelpers.callMethod(preferences(), "f", ctx, pkg) == 1);
-                boolean active = allowed(pkg, "vaa") && pkg.equals(foreground());
-                section.setEnabled(active);
-                toggle.setEnabled(active);
-            } catch (Throwable t) { toggle.setEnabled(false); log("VAA_UI_ERROR " + t); }
-        };
-        // Click listener avoids dispatching commands during initial/attach state refresh.
-        toggle.setClickable(false);
-        section.setOnClickListener(view -> {
-            try {
-                if (!allowed(pkg, "vaa") || !pkg.equals(foreground()) || algorithmBlocked(ctx, pkg, "vaa_controlled")) {
-                    refresh.run();
-                    android.widget.Toast.makeText(ctx, "VAA: game đã đổi hoặc thuật toán đang chờ cập nhật.", android.widget.Toast.LENGTH_LONG).show();
-                    return;
-                }
-                Object manager = XposedHelpers.callStaticMethod(XposedHelpers.findClass("com.vivo.gameassistant.o", loader), "V");
-                Object controller = XposedHelpers.callMethod(manager, "x0");
-                int value = checked.isChecked() ? 0 : 1;
-                // t1(false) sends the stock command; save against the captured real package
-                // rather than a possibly stale resolution-controller package field.
-                XposedHelpers.callMethod(controller, "t1", value, false);
-                XposedHelpers.callMethod(preferences(), "m", ctx, pkg, value);
-                log(process + " VAA_SELECTION pkg=" + pkg + " requested=" + value + " setting="
-                        + Settings.Global.getInt(ctx.getContentResolver(), "vaa_value_from_gamecube", -1));
-            } catch (Throwable t) {
-                log("VAA_UI_ERROR " + t);
-                android.widget.Toast.makeText(ctx, "Không gửi được lệnh VAA.", android.widget.Toast.LENGTH_LONG).show();
-            }
-            refresh.run();
-        });
-        section.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener() {
-            @Override public void onViewAttachedToWindow(android.view.View view) { refresh.run(); }
-            @Override public void onViewDetachedFromWindow(android.view.View view) { }
-        });
-        int inset = (int)(17 * ctx.getResources().getDisplayMetrics().density + 0.5f);
-        android.view.View divider = new android.view.View(ctx);
-        divider.setBackgroundColor(0x1affffff);
-        android.widget.LinearLayout.LayoutParams line = new android.widget.LinearLayout.LayoutParams(-1, Math.max(1, (int)ctx.getResources().getDisplayMetrics().density));
-        line.setMargins(inset, 0, inset, 0);
-        content.addView(divider, line);
-        android.widget.LinearLayout.LayoutParams row = new android.widget.LinearLayout.LayoutParams(-1, -2);
-        row.setMargins(inset, 0, inset, inset);
-        content.addView(section, row);
-        refresh.run();
-        once("vaa-ui:" + pkg, "VAA_UI_ADDED pkg=" + pkg + " panelType=" + XposedHelpers.getIntField(panel, "a"));
+    private void hideVaaControl(android.view.View panel) throws Throwable {
+        int rowId = panel.getResources().getIdentifier("cl_vaa", "id", panel.getContext().getPackageName());
+        android.view.View row = rowId == 0 ? null : panel.findViewById(rowId);
+        if (row != null) row.setVisibility(android.view.View.GONE);
     }
 
     private static final Set<String> MEMC_KEYS = new HashSet<>(Arrays.asList(
@@ -406,9 +314,6 @@ public final class GameUnlock implements IXposedHookLoadPackage {
             "gpu_memc_dynamic_whitelist_apps", "gpu_memc_gles_dynamic_whitelist_apps", "gpu_memc_vulkan_dynamic_whitelist_apps"));
     private static final Set<String> VSR_KEYS = new HashSet<>(Arrays.asList(
             "vsr_whitelist_apps", "vsr_all_whitelist_apps", "vsr_gles_whitelist_apps", "vsr_vulkan_whitelist_apps"));
-    private static final Set<String> VAA_KEYS = new HashSet<>(Arrays.asList(
-            "vaa_whitelist_apps", "vaa_gles_whitelist_apps", "vaa_dynamic_whitelist_apps", "vaa_gles_dynamic_whitelist_apps"));
-
     private Object frameProfile(String pkg) {
         int target = state.policy().targetFps;
         List<Object> boost = Collections.singletonList(XposedHelpers.newInstance(
@@ -500,11 +405,9 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         });
         backend("memc", "MEMC", "MEMC", "memc");
         backend("sr", "VSR", "VSR", "vsr");
-        backend("vaa", "VAA", "VAA", "vaa");
         genericMemcBackend();
         auditDispatch(service, "dispatchMEMCEnabled", "memc");
         auditDispatch(service, "dispatchVSREnabled", "vsr");
-        auditDispatch(service, "dispatchVAAEnabled", "vaa");
     }
 
     private void genericMemcBackend() {

@@ -13,6 +13,7 @@ public final class PolicyTest {
     }
     public static void main(String[] args) {
         Policy p = config(true, true, true, true, true, 120, "", "");
+        check(!p.vaa, "legacy VAA enable is ignored");
         check(p.allows("com.garena.game.kgvn"), "non-Chinese package admitted");
         check(p.allows("com.miHoYo.GenshinImpact"), "international package admitted");
         check(!p.allows("android"), "system package rejected");

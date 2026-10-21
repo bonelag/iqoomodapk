@@ -45,16 +45,16 @@ final class RuntimeState {
         // supply configuration. Provider visibility filters no longer disable a received config.
         handler.post(() -> {
             try {
-                cache = ctx.getSharedPreferences(ConfigContract.CACHE, 0);
-                if (cache.getBoolean("received", false)) received = ConfigStore.read(cache);
                 BroadcastReceiver receiver = new BroadcastReceiver() {
                     @Override public void onReceive(Context c, Intent intent) {
                         try {
                             Bundle b = intent.getExtras();
                             if (b == null || b.getInt("protocol", 0) != 1) return;
+                            if (received != null && b.getLong("revision", 0) < received.getLong("revision", 0)) return;
                             received = new Bundle(b);
-                            ConfigStore.write(cache, received);
                             apply(ctx, received);
+                            try { if (cache != null) ConfigStore.write(cache, received); }
+                            catch (Throwable t) { GameUnlock.log("CONFIG_CACHE_ERROR: " + t); }
                             GameUnlock.log("CONFIG_RECEIVED host=" + ctx.getPackageName() + " revision=" + b.getLong("revision", 0));
                         } catch (Throwable t) { GameUnlock.log("CONFIG_RECEIVE_ERROR: " + t); }
                     }
@@ -65,6 +65,22 @@ final class RuntimeState {
                 else ctx.registerReceiver(receiver, filter, ConfigContract.PERMISSION, handler);
                 GameUnlock.log("CONFIG_RECEIVER_READY host=" + ctx.getPackageName());
             } catch (Throwable t) { GameUnlock.log("CONFIG_RECEIVER_ERROR: " + t); }
+            request(ctx);
+            try {
+                cache = ctx.createDeviceProtectedStorageContext().getSharedPreferences(ConfigContract.CACHE, 0);
+                if (cache.getBoolean("received", false)) {
+                    received = ConfigStore.read(cache);
+                    apply(ctx, received);
+                }
+            } catch (Throwable t) { GameUnlock.log("CONFIG_CACHE_ERROR: " + t); }
+            IntentFilter events = new IntentFilter(Intent.ACTION_USER_UNLOCKED);
+            ctx.registerReceiver(new BroadcastReceiver() {
+                @Override public void onReceive(Context c, Intent i) {
+                    lastPackageScan = 0;
+                    request(ctx);
+                    if (received != null) apply(ctx, received);
+                }
+            }, events, null, handler);
         });
         handler.post(new Runnable() {
             @Override public void run() {
@@ -85,25 +101,32 @@ final class RuntimeState {
                     }
                 } finally {
                     // Explicit manifest receiver is short-lived, no activity/service start or root.
-                    try {
-                        ctx.sendBroadcast(new Intent().setComponent(new ComponentName(Policy.MODULE,
-                                Policy.MODULE + ".ConfigRequestReceiver")).putExtra("target", ctx.getPackageName()));
-                    } catch (Throwable t) { GameUnlock.log("CONFIG_REQUEST_ERROR: " + t); }
+                    request(ctx);
                     handler.postDelayed(this, 15000);
                 }
             }
         });
     }
 
+    private void request(Context ctx) {
+        try {
+            ctx.sendBroadcast(new Intent().setComponent(new ComponentName(Policy.MODULE,
+                    Policy.MODULE + ".ConfigRequestReceiver")).putExtra("target", ctx.getPackageName())
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND));
+        } catch (Throwable t) { GameUnlock.log("CONFIG_REQUEST_ERROR: " + t); }
+    }
+
     private void apply(Context ctx, Bundle b) {
         if (lastPackageScan == 0 || SystemClock.elapsedRealtime() - lastPackageScan > 60000) {
-            Set<String> next = new HashSet<>();
-            for (ApplicationInfo ai : ctx.getPackageManager().getInstalledApplications(0)) {
-                if (ai.enabled && ai.uid % 100000 >= 10000 && (ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0)
-                    next.add(ai.packageName);
-            }
-            installed = next;
-            lastPackageScan = SystemClock.elapsedRealtime();
+            try {
+                Set<String> next = new HashSet<>();
+                for (ApplicationInfo ai : ctx.getPackageManager().getInstalledApplications(0)) {
+                    if (ai.enabled && ai.uid % 100000 >= 10000 && (ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0)
+                        next.add(ai.packageName);
+                }
+                installed = next;
+                lastPackageScan = SystemClock.elapsedRealtime();
+            } catch (Throwable t) { GameUnlock.log("CONFIG_PACKAGES_ERROR: " + t); }
         }
         Policy next = new Policy(b.getBoolean("enabled", true), b.getBoolean("all_apps", true),
                 b.getBoolean("memc", true), b.getBoolean("vsr", true), b.getBoolean("vaa", true),

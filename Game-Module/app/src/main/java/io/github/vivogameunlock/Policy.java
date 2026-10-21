@@ -15,7 +15,9 @@ public final class Policy {
     public Policy(boolean enabled, boolean allApps, boolean memc, boolean vsr, boolean vaa,
                   int targetFps, String selected, String excluded, Set<String> installed) {
         this.enabled = enabled; this.allApps = allApps;
-        this.memc = memc; this.vsr = vsr; this.vaa = vaa;
+        this.memc = memc; this.vsr = vsr;
+        // Ignore legacy VAA preferences, including cached configuration from older scopes.
+        this.vaa = false;
         this.targetFps = targetFps == 60 || targetFps == 90 || targetFps == 120 ? targetFps : 120;
         this.selected = parse(selected); this.excluded = parse(excluded);
         this.installed = Collections.unmodifiableSet(new HashSet<>(installed));

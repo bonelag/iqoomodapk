@@ -1,8 +1,0 @@
-{
-  "version": "0.1.3",
-  "versionCode": 4,
-  "rollback_result": "Success",
-  "package_manager_verified_on_previous_action": true,
-  "install_arguments": "-r -d --dont-kill --no-incremental",
-  "device_actions_during_source_rollback": []
-}

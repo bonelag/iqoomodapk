@@ -1,0 +1,11 @@
+{
+  "version": "0.1.2",
+  "versionCode": 3,
+  "install": "adb install -r --dont-kill --no-incremental",
+  "result": "Success",
+  "package_manager_verified": true,
+  "queried_pids_immediately_before_and_after": "1988 3252 18953 20792 23153 23447",
+  "reboot_force_stop_kill_commands_issued": false,
+  "later_observation": "system_server and GameWatch loaded 0.1.2 after process IDs changed; cause unconfirmed",
+  "vaa_vsr_gameplay_verified": false
+}

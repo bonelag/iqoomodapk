@@ -1,0 +1,17 @@
+# Build output and local-only state (signing key, Ghidra caches)
+/build/
+/build-output.log
+/.local/
+*.idsig
+
+# Firmware / decompiled vendor artifacts pulled from the device
+/research/vivo-services/
+/research/vivo-framework/
+/research/*.jar
+/research/*.log
+/research/runtime/
+/research/graphics/
+
+# Python
+__pycache__/
+*.pyc

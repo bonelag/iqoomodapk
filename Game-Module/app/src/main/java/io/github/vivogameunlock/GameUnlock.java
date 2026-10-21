@@ -1,0 +1,577 @@
+package io.github.vivogameunlock;
+
+import android.app.Application;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.os.Build;
+import android.provider.Settings;
+import java.lang.reflect.Method;
+import java.util.*;
+import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
+
+/** Version-specific hooks for the artifacts documented in research/HOOKS.md. */
+public final class GameUnlock implements IXposedHookLoadPackage {
+    private static final String TARGET_FINGERPRINT = "vivo/PD2507/PD2507:15/AP3A.240905.015.A2_V000L1/compiler251024223111:user/release-keys";
+    private final RuntimeState state = new RuntimeState();
+    private final Set<String> logged = Collections.synchronizedSet(new HashSet<>());
+    private final Set<Object> syntheticResolution = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+    private final Set<Object> syntheticFrames = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+    private final Map<String, Integer> frameTargets = new HashMap<>();
+    private final Set<String> genericOverheat = Collections.synchronizedSet(new HashSet<>());
+    private final Map<Object, Object> resolutionStrategies = Collections.synchronizedMap(new WeakHashMap<>());
+    private final ThreadLocal<Boolean> stockAdmission = new ThreadLocal<>();
+    private final ClassLoader loader;
+    private final String process;
+
+    public GameUnlock() { this(null, "module-entry"); }
+    private GameUnlock(ClassLoader loader, String process) {
+        this.loader = loader;
+        this.process = process;
+    }
+
+    interface Action { void run(XC_MethodHook.MethodHookParam p) throws Throwable; }
+
+    static void log(String message) {
+        try { XposedBridge.log("[VivoGameUnlock] " + message); } catch (Throwable ignored) { }
+    }
+    private void once(String key, String message) { if (logged.size() < 2048 && logged.add(key)) log(process + " " + message); }
+
+    @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        // Xposed reuses the entry object for unrelated package callbacks. Never replace an
+        // installed hook's class loader with a loader from a later handleLoadPackage call.
+        if (!"android".equals(lp.packageName) && !"system".equals(lp.packageName)
+                && !"com.vivo.gamecube".equals(lp.packageName) && !"com.vivo.gamewatch".equals(lp.packageName)) return;
+        new GameUnlock(lp.classLoader, lp.processName).install(lp);
+    }
+
+    private void install(XC_LoadPackage.LoadPackageParam lp) {
+        if (!"PD2507".equals(Build.DEVICE) || Build.VERSION.SDK_INT != 35) return;
+        if (!TARGET_FINGERPRINT.equals(Build.FINGERPRINT)) {
+            once("rom", "UNSUPPORTED_ROM " + Build.FINGERPRINT); return;
+        }
+        log("LOAD version=0.1.3 package=" + lp.packageName + " process=" + process);
+        if (("android".equals(lp.packageName) || "system".equals(lp.packageName))
+                && ("android".equals(process) || "system".equals(process) || "system_server".equals(process))) {
+            systemHooks();
+        } else if ("com.vivo.gamecube".equals(lp.packageName) || "com.vivo.gamewatch".equals(lp.packageName)) {
+            hook(Application.class, "attach", new Object[]{Context.class}, null, p -> {
+                Context ctx = (Context)p.args[0];
+                if (!lp.packageName.equals(ctx.getPackageName())) return;
+                long code = ctx.getPackageManager().getPackageInfo(lp.packageName, 0).getLongVersionCode();
+                long expected = "com.vivo.gamecube".equals(lp.packageName) ? 1401000 : 250003;
+                if (code != expected) { once("version", "UNSUPPORTED_VERSION " + code); return; }
+                // Bind app hooks to the application Context's loader after attach completes.
+                // A load-package entry may also be used for dependency/resource package loads.
+                GameUnlock appSession = new GameUnlock(ctx.getClassLoader(), process);
+                appSession.state.start(ctx);
+                if ("com.vivo.gamecube".equals(lp.packageName)) appSession.cubeHooks(); else appSession.watchHooks();
+            });
+        }
+    }
+
+    private void hook(String type, String method, Object[] args, Action before, Action after) {
+        try { hook(XposedHelpers.findClass(type, loader), method, args, before, after); }
+        catch (Throwable t) { once(type + "." + method, "HOOK_MISSING " + type + "." + method + " " + t); }
+    }
+    private void hook(Class<?> type, String method, Object[] args, Action before, Action after) {
+        try {
+            Object[] signature = Arrays.copyOf(args, args.length + 1);
+            signature[args.length] = new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (before != null) guarded(type.getName() + "." + method, before, p);
+                }
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (after != null && !p.hasThrowable()) guarded(type.getName() + "." + method, after, p);
+                }
+            };
+            XposedHelpers.findAndHookMethod(type, method, signature);
+            log(process + " HOOK_OK " + type.getName() + "." + method);
+        } catch (Throwable t) { once(type.getName() + "." + method, "HOOK_MISSING " + type.getName() + "." + method + " " + t); }
+    }
+    private void guarded(String name, Action action, XC_MethodHook.MethodHookParam p) {
+        Object original = p.getResult();
+        try { action.run(p); }
+        catch (Throwable t) {
+            // Callbacks never throw into OEM processes, especially system_server.
+            if (!p.hasThrowable() && p.getResult() != original) p.setResult(original);
+            once("error:" + name, "HOOK_ERROR " + name + " " + t);
+        }
+    }
+    private boolean allowed(String pkg, String feature) {
+        Policy cfg = state.policy();
+        return cfg.allows(pkg) && ("memc".equals(feature) ? cfg.memc : "vsr".equals(feature) ? cfg.vsr : cfg.vaa);
+    }
+    private String foreground() {
+        try {
+            Object controller = XposedHelpers.callStaticMethod(
+                    XposedHelpers.findClass("com.vivo.gameassistant.o", loader), "V");
+            return (String)XposedHelpers.callMethod(controller, "O0");
+        } catch (Throwable ignored) { return null; }
+    }
+
+    private void cubeHooks() {
+        Class<?> function = XposedHelpers.findClass("com.vivo.common.supportlist.pojo.ConfiguredFunction", loader);
+        String util = "com.vivo.gameassistant.utils.f0";
+        for (String method : new String[]{"d0", "F0"}) {
+            hook(util, method, new Object[]{function, String.class}, null, p -> {
+                if (Boolean.TRUE.equals(p.getResult()) || p.args[0] == null) return;
+                Policy cfg = state.policy();
+                if (cfg.allows((String)p.args[1]) && cfg.feature(((Enum<?>)p.args[0]).name())) p.setResult(true);
+            });
+        }
+        // G0 is the quick-switch availability gate, with different names from ConfiguredFunction.
+        hook(util, "G0", new Object[]{"com.vivo.gameassistant.homegui.sideslide.controlcenter.switches.model.QuickSwitchItemType", String.class}, null, p -> {
+            if (p.args[0] == null) return;
+            String name = ((Enum<?>)p.args[0]).name();
+            if (("GAME_SUPER_RESOLUTION".equals(name) && allowed((String)p.args[1], "vsr"))
+                    || ("FRAME_INTERPOLATION".equals(name) && allowed((String)p.args[1], "memc"))) p.setResult(true);
+        });
+        hook(util, "k0", new Object[]{String.class}, null, p -> {
+            if (allowed((String)p.args[0], "memc")) p.setResult(true);
+        });
+        hook("com.vivo.gameassistant.frameinterpolation.h", "a1", new Object[]{}, p -> {
+            ensureFrameProfile(foreground());
+        }, null);
+        hook("com.vivo.gameassistant.frameinterpolation.h", "f0", new Object[]{
+                "com.vivo.gameassistant.frameinterpolation.FrameInterpolationState", String.class}, p -> {
+            ensureFrameProfile((String)p.args[1]);
+        }, null);
+        hook(util, "S0", new Object[]{Context.class, String.class}, p -> {
+            ensureResolutionProfile((String)p.args[1]);
+        }, null); // Keep the OEM hardware-capability gate in S0.
+        hook("com.vivo.gameassistant.superresolution.i", "K0", new Object[]{String.class, boolean.class}, p -> {
+            ensureResolutionProfile((String)p.args[0]);
+            bindResolutionStrategy(p.thisObject, (String)p.args[0]);
+        }, null);
+        graphicsHooks();
+        hook("com.vivo.gameassistant.superresolution.m", "f", new Object[]{String.class}, null, p -> {
+            if (allowed((String)p.args[0], "vsr")) p.setResult(true);
+        });
+        hook("com.vivo.common.utils.f0", "j", new Object[]{Context.class, String.class}, null, p -> {
+            if (allowed((String)p.args[1], "vaa")) p.setResult(true);
+        });
+
+        // Virtual read results only: never overwrite system whitelist Settings.
+        hook(Settings.Global.class, "getString", new Object[]{ContentResolver.class, String.class}, null, p -> {
+            String key = (String)p.args[1];
+            if (Boolean.TRUE.equals(stockAdmission.get())) return;
+            if (!state.policy().enabled || key == null || state.packages().isEmpty()) return;
+            boolean add = (state.policy().vsr && VSR_KEYS.contains(key))
+                    || (state.policy().memc && MEMC_KEYS.contains(key))
+                    || (state.policy().vaa && VAA_KEYS.contains(key));
+            if (add) {
+                String original = (String)p.getResult();
+                p.setResult(original == null || original.isEmpty() ? state.packages() : original + ";" + state.packages());
+            }
+        });
+        hook("m9.j", "s", new Object[]{String.class}, null, p -> {
+            String pkg = (String)p.args[0]; if (pkg == null || pkg.isEmpty()) pkg = foreground();
+            if (p.getResult() == null && allowed(pkg, "memc")) p.setResult(frameProfile(pkg));
+        });
+        // Both legacy and V3 dimensions get real package/PID; GPU route 3 is required by this ROM.
+        for (String method : new String[]{"k", "l"}) {
+            hook("com.vivo.gameassistant.frameinterpolation.k", method, new Object[]{String.class}, null, p -> {
+                String pkg = (String)p.args[0];
+                if (p.getResult() == null && allowed(pkg, "memc")) {
+                    Object dimension = XposedHelpers.newInstance(XposedHelpers.findClass("q8.b", loader));
+                    XposedHelpers.callMethod(dimension, "l", Policy.GPU_ROUTE);
+                    XposedHelpers.callMethod(dimension, "m", false);
+                    p.setResult(dimension);
+                }
+            });
+        }
+        // The legacy strategy otherwise hardcodes half/target=60/120 for every generic game.
+        hook("m9.d", "l", new Object[]{int.class, int.class, int.class, int.class,
+                "com.vivo.gameassistant.frameinterpolation.FrameInterpolationState"}, p -> {
+            String pkg = foreground();
+            if (!allowed(pkg, "memc") || hasStockFrameProfile(pkg)) return;
+            String mode = ((Enum<?>)p.args[4]).name();
+            if ((!"OPTIMIZE_POWER_CONSUMPTION".equals(mode) && !"BOOST_FRAME".equals(mode)) || (Integer)p.args[2] <= 0) return;
+            int target = "OPTIMIZE_POWER_CONSUMPTION".equals(mode) ? 60 : state.policy().targetFps;
+            Object helper = XposedHelpers.callStaticMethod(XposedHelpers.findClass(
+                    "com.vivo.gameassistant.frameinterpolation.i", loader), "e");
+            XposedHelpers.callMethod(helper, "h", Policy.GPU_ROUTE, (Integer)p.args[2], target / 2, target);
+            once("generic:" + pkg, "MEMC_REQUEST pkg=" + pkg + " pid=" + p.args[2] + " " + target/2 + "->" + target);
+            p.setResult(null);
+        }, null);
+        // Audit only; no request or success result is fabricated here.
+        hook("com.vivo.common.utils.j0", "b", new Object[]{Context.class, boolean.class, int.class, int.class, int.class, int.class}, null, p -> {
+            once("request:" + Arrays.toString(Arrays.copyOfRange(p.args, 1, p.args.length)),
+                    "SIDEBAR_MEMC_REQUEST " + Arrays.toString(Arrays.copyOfRange(p.args, 1, p.args.length)));
+        });
+    }
+
+    private Object preferences() {
+        return XposedHelpers.callStaticMethod(XposedHelpers.findClass("com.vivo.common.utils.f0", loader), "h");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object genericResolution(String pkg) {
+        if (!allowed(pkg, "vsr")) return null;
+        List<Object> list = (List<Object>)XposedHelpers.getStaticObjectField(XposedHelpers.findClass(
+                "com.vivo.gameassistant.AssistantUIService", loader), "i");
+        if (list != null) for (Object entry : list)
+            if (pkg.equals(XposedHelpers.callMethod(entry, "p")))
+                return syntheticResolution.contains(entry) ? entry : null;
+        return null;
+    }
+
+    private void bindResolutionStrategy(Object controller, String pkg) {
+        Object record = genericResolution(pkg);
+        Object saved = resolutionStrategies.remove(controller);
+        if (saved != null) XposedHelpers.setObjectField(controller, "z", saved);
+        if (record == null) return;
+        Object original = XposedHelpers.getObjectField(controller, "z");
+        Object strategy = XposedHelpers.newInstance(XposedHelpers.findClass(
+                "com.vivo.gameassistant.superresolution.o", loader));
+        XposedHelpers.callMethod(strategy, "p", record);
+        resolutionStrategies.put(controller, original);
+        XposedHelpers.setObjectField(controller, "z", strategy);
+    }
+
+    private boolean algorithmBlocked(Context ctx, String pkg, String feature) {
+        return Boolean.TRUE.equals(XposedHelpers.callStaticMethod(XposedHelpers.findClass(
+                "com.vivo.common.algorithem.b", loader), "f", ctx, pkg, feature));
+    }
+
+    private boolean directResolution(String pkg) {
+        return genericResolution(pkg) != null || (allowed(pkg, "vsr") && "com.miHoYo.GenshinImpact".equals(pkg));
+    }
+
+    private void graphicsHooks() {
+        String sr = "com.vivo.gameassistant.superresolution.i";
+        // Unknown games have no AISR/SDK conflict metadata. Use the OEM high-mode
+        // command directly, retaining its real result and all native admission checks.
+        hook(sr, "l1", new Object[]{int.class}, p -> {
+            String pkg = foreground();
+            ensureResolutionProfile(pkg);
+            if (!directResolution(pkg)) return;
+            Object controller = p.thisObject;
+            Context ctx = (Context)XposedHelpers.getObjectField(controller, "a");
+            int mode = (Integer)p.args[0];
+            int previous = (Integer)XposedHelpers.callMethod(preferences(), "e", ctx, pkg);
+            String reason = null;
+            if (!pkg.equals(XposedHelpers.getObjectField(controller, "k"))) reason = "foreground_mismatch";
+            else if (mode != 0 && mode != 1) reason = "unsupported_mode";
+            else if (algorithmBlocked(ctx, pkg, "vsr_controlled")) reason = "algorithm_pending";
+            else if (!Boolean.TRUE.equals(XposedHelpers.callStaticMethod(XposedHelpers.findClass(
+                    "com.vivo.gameassistant.utils.f0", loader), "S0", ctx, pkg))) reason = "hardware_gate";
+            if (reason == null) {
+                bindResolutionStrategy(controller, pkg);
+                XposedHelpers.callMethod(controller, "P0");
+                XposedHelpers.callMethod(controller, "O0");
+                boolean hot = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "a1", mode));
+                double temperature = XposedHelpers.getDoubleField(controller, "C");
+                if (mode == 1 && (hot || !Double.isFinite(temperature) || temperature <= 0)) reason = "thermal_gate";
+            }
+            boolean success = false;
+            if (reason == null) {
+                if (genericResolution(pkg) != null) {
+                    success = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "w1", ctx, pkg, mode == 1, true));
+                } else {
+                    // International Genshin has a stock profile, but does not reliably
+                    // deliver the Chinese G_RenderResolution SDK event required by l1.
+                    // Send VSR only: do not invent that SDK value or alter MEMC rates.
+                    success = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "v1", ctx, pkg, mode == 1, false));
+                    if (success) {
+                        XposedHelpers.callMethod(preferences(), "l", ctx, pkg, mode);
+                        XposedHelpers.callMethod(controller, "n1", mode);
+                    }
+                }
+                if (success) {
+                    XposedHelpers.setBooleanField(controller, "b", mode == 1);
+                    XposedHelpers.setBooleanField(controller, "l", false);
+                    XposedHelpers.callMethod(controller, "J1", mode, pkg);
+                }
+                else reason = "command_rejected";
+            }
+            int stored = (Integer)XposedHelpers.callMethod(preferences(), "e", ctx, pkg);
+            log(process + " VSR_SELECTION pkg=" + pkg + " mode=" + mode + " previous=" + previous
+                    + " accepted=" + success + " stored=" + stored + " reason=" + reason
+                    + " setting=" + Settings.Global.getInt(ctx.getContentResolver(), "vsr_value_from_gamecube", -1));
+            if (!success) {
+                Object panel = XposedHelpers.getObjectField(controller, "q");
+                if (panel != null) XposedHelpers.callMethod(panel, "g", stored);
+                android.widget.Toast.makeText(ctx, "VSR: chưa gửi được lệnh (" + reason + ")", android.widget.Toast.LENGTH_LONG).show();
+            }
+            p.setResult(success);
+        }, null);
+        hook("com.vivo.gameassistant.homegui.sideslide.panels.qchip.CommonSuperResolutionFrameView", "c",
+                new Object[]{Context.class}, null, p -> addVaaControl((android.view.View)p.thisObject));
+        hook(sr, "t1", new Object[]{int.class, boolean.class}, null, p ->
+                log(process + " VAA_REQUEST pkg=" + foreground() + " state=" + p.args[0]));
+        hook(sr, "v1", new Object[]{Context.class, String.class, boolean.class, boolean.class}, null, p -> {
+            if (directResolution((String)p.args[1]))
+                log(process + " VSR_COMMAND pkg=" + p.args[1] + " enabled=" + p.args[2] + " accepted=" + p.getResult());
+        });
+    }
+
+    private void addVaaControl(android.view.View panel) throws Throwable {
+        Context ctx = panel.getContext();
+        String pkg = foreground();
+        if (!allowed(pkg, "vaa")) return;
+        // Preserve the vendor's SDK-specific UI for games that originally supported VAA.
+        Method admission = XposedHelpers.findMethodExact(XposedHelpers.findClass(
+                "com.vivo.common.utils.f0", loader), "j", Context.class, String.class);
+        boolean stockVaa;
+        stockAdmission.set(true);
+        try { stockVaa = Boolean.TRUE.equals(XposedBridge.invokeOriginalMethod(admission, preferences(), new Object[]{ctx, pkg})); }
+        finally { stockAdmission.remove(); }
+        if (stockVaa) return;
+        boolean gles = Boolean.TRUE.equals(XposedHelpers.callStaticMethod(XposedHelpers.findClass(
+                "android.os.SystemProperties", loader), "getBoolean", "sys.game.vaa.gles.enable", false));
+        if (!gles) return;
+        android.widget.LinearLayout content = (android.widget.LinearLayout)XposedHelpers.getObjectField(panel, "f");
+        if (content.findViewWithTag("vgu.vaa") != null) return;
+        int originalRowId = ctx.getResources().getIdentifier("cl_vaa", "id", ctx.getPackageName());
+        android.view.View originalRow = originalRowId == 0 ? null : panel.findViewById(originalRowId);
+        if (originalRow != null) originalRow.setVisibility(android.view.View.GONE);
+        // Inflate the host's own XML, detach only its VAA row, and discard the
+        // unattached preview/radio controls. No OEM presenter/SDK listener is created.
+        int layoutId = ctx.getResources().getIdentifier("layout_qchip_super_frame", "layout", ctx.getPackageName());
+        android.view.View template = android.view.LayoutInflater.from(ctx).inflate(layoutId, null, false);
+        android.view.View section = template.findViewById(originalRowId);
+        if (section == null) throw new IllegalStateException("OEM VAA row missing");
+        ((android.view.ViewGroup)section.getParent()).removeView(section);
+        section.setTag("vgu.vaa");
+        android.view.View toggle = section.findViewById(ctx.getResources().getIdentifier("sw_vaa", "id", ctx.getPackageName()));
+        android.widget.Checkable checked = (android.widget.Checkable)toggle;
+        android.widget.TextView title = section.findViewById(ctx.getResources().getIdentifier("tv_vaa", "id", ctx.getPackageName()));
+        title.setText("Khử răng cưa");
+        title.setMaxLines(1);
+        Object tint = XposedHelpers.callStaticMethod(XposedHelpers.findClass("com.vivo.gameassistant.utils.d0", loader), "a");
+        XposedHelpers.callMethod(tint, "b", toggle, true);
+        android.view.View help = section.findViewById(ctx.getResources().getIdentifier("iv_vaa", "id", ctx.getPackageName()));
+        help.setContentDescription("Thông tin khử răng cưa");
+        help.setOnClickListener(view -> android.widget.Toast.makeText(ctx,
+                "com.miHoYo.GenshinImpact".equals(pkg)
+                        ? "ROM này không hỗ trợ VAA trên Vulkan. Công tắc không có tác dụng nếu Genshin dùng Vulkan."
+                        : "VAA chỉ có tác dụng khi game tương thích. Công tắc lưu yêu cầu, không xác nhận khử răng cưa đã chạy.",
+                android.widget.Toast.LENGTH_LONG).show());
+        Runnable refresh = () -> {
+            try {
+                checked.setChecked((Integer)XposedHelpers.callMethod(preferences(), "f", ctx, pkg) == 1);
+                boolean active = allowed(pkg, "vaa") && pkg.equals(foreground());
+                section.setEnabled(active);
+                toggle.setEnabled(active);
+            } catch (Throwable t) { toggle.setEnabled(false); log("VAA_UI_ERROR " + t); }
+        };
+        // Click listener avoids dispatching commands during initial/attach state refresh.
+        toggle.setClickable(false);
+        section.setOnClickListener(view -> {
+            try {
+                if (!allowed(pkg, "vaa") || !pkg.equals(foreground()) || algorithmBlocked(ctx, pkg, "vaa_controlled")) {
+                    refresh.run();
+                    android.widget.Toast.makeText(ctx, "VAA: game đã đổi hoặc thuật toán đang chờ cập nhật.", android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                }
+                Object manager = XposedHelpers.callStaticMethod(XposedHelpers.findClass("com.vivo.gameassistant.o", loader), "V");
+                Object controller = XposedHelpers.callMethod(manager, "x0");
+                int value = checked.isChecked() ? 0 : 1;
+                // t1(false) sends the stock command; save against the captured real package
+                // rather than a possibly stale resolution-controller package field.
+                XposedHelpers.callMethod(controller, "t1", value, false);
+                XposedHelpers.callMethod(preferences(), "m", ctx, pkg, value);
+                log(process + " VAA_SELECTION pkg=" + pkg + " requested=" + value + " setting="
+                        + Settings.Global.getInt(ctx.getContentResolver(), "vaa_value_from_gamecube", -1));
+            } catch (Throwable t) {
+                log("VAA_UI_ERROR " + t);
+                android.widget.Toast.makeText(ctx, "Không gửi được lệnh VAA.", android.widget.Toast.LENGTH_LONG).show();
+            }
+            refresh.run();
+        });
+        section.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(android.view.View view) { refresh.run(); }
+            @Override public void onViewDetachedFromWindow(android.view.View view) { }
+        });
+        int inset = (int)(17 * ctx.getResources().getDisplayMetrics().density + 0.5f);
+        android.view.View divider = new android.view.View(ctx);
+        divider.setBackgroundColor(0x1affffff);
+        android.widget.LinearLayout.LayoutParams line = new android.widget.LinearLayout.LayoutParams(-1, Math.max(1, (int)ctx.getResources().getDisplayMetrics().density));
+        line.setMargins(inset, 0, inset, 0);
+        content.addView(divider, line);
+        android.widget.LinearLayout.LayoutParams row = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        row.setMargins(inset, 0, inset, inset);
+        content.addView(section, row);
+        refresh.run();
+        once("vaa-ui:" + pkg, "VAA_UI_ADDED pkg=" + pkg + " panelType=" + XposedHelpers.getIntField(panel, "a"));
+    }
+
+    private static final Set<String> MEMC_KEYS = new HashSet<>(Arrays.asList(
+            "gpu_memc_whitelist_apps", "gpu_memc_gles_whitelist_apps", "gpu_memc_vulkan_whitelist_apps",
+            "gpu_memc_dynamic_whitelist_apps", "gpu_memc_gles_dynamic_whitelist_apps", "gpu_memc_vulkan_dynamic_whitelist_apps"));
+    private static final Set<String> VSR_KEYS = new HashSet<>(Arrays.asList(
+            "vsr_whitelist_apps", "vsr_all_whitelist_apps", "vsr_gles_whitelist_apps", "vsr_vulkan_whitelist_apps"));
+    private static final Set<String> VAA_KEYS = new HashSet<>(Arrays.asList(
+            "vaa_whitelist_apps", "vaa_gles_whitelist_apps", "vaa_dynamic_whitelist_apps", "vaa_gles_dynamic_whitelist_apps"));
+
+    private Object frameProfile(String pkg) {
+        int target = state.policy().targetFps;
+        List<Object> boost = Collections.singletonList(XposedHelpers.newInstance(
+                XposedHelpers.findClass("s7.b", loader), target == 90 ? 60 : target/2, target/2, target));
+        List<Object> power = Collections.singletonList(XposedHelpers.newInstance(
+                XposedHelpers.findClass("s7.b", loader), 60, 30, 60));
+        Map<Integer, Map<String, String>> tips = new HashMap<>();
+        for (int fps : new int[]{30, 60, 90, 120}) {
+            Map<String, String> tip = new HashMap<>(); tip.put("tipStringName", ""); tip.put("tipString", fps + " FPS");
+            tips.put(fps, tip);
+        }
+        return XposedHelpers.newInstance(XposedHelpers.findClass(
+                "com.vivo.common.frameintersupportlist.entity.a", loader),
+                pkg, pkg, "#", Policy.GPU_ROUTE, false, boost, power, tips, 47.0d, 44.0d, 0, 0);
+    }
+
+    private boolean hasStockFrameProfile(String pkg) {
+        // Ask the unhooked lookup; do not guess from gameIndex or spoof game identity.
+        try {
+            Class<?> type = XposedHelpers.findClass("m9.j", loader);
+            Method method = XposedHelpers.findMethodExact(type, "s", String.class);
+            Object result = XposedBridge.invokeOriginalMethod(method, XposedHelpers.newInstance(type), new Object[]{pkg});
+            return result != null && !syntheticFrames.contains(result);
+        } catch (Throwable ignored) { return true; } // Unknown => preserve stock behavior.
+    }
+
+    @SuppressWarnings("unchecked")
+    private synchronized void ensureFrameProfile(String pkg) {
+        Class<?> service = XposedHelpers.findClass("com.vivo.gameassistant.AssistantUIService", loader);
+        List<Object> original = (List<Object>)XposedHelpers.getStaticObjectField(service, "h");
+        List<Object> list = original == null ? new ArrayList<>() : new ArrayList<>(original);
+        int target = state.policy().targetFps;
+        list.removeIf(item -> {
+            if (!syntheticFrames.contains(item)) return false;
+            String name = (String)XposedHelpers.callMethod(item, "k");
+            return !allowed(name, "memc") || !Integer.valueOf(target).equals(frameTargets.get(name));
+        });
+        if (allowed(pkg, "memc")) {
+            boolean present = false;
+            for (Object entry : list) if (pkg.equals(XposedHelpers.callMethod(entry, "k"))) { present = true; break; }
+            if (!present) {
+                Object entry = frameProfile(pkg);
+                list.add(entry); syntheticFrames.add(entry); frameTargets.put(pkg, target);
+                once("frameprofile:" + pkg, "MEMC_PROFILE pkg=" + pkg + " GPU route=3 source=" + target/2 + " target=" + target);
+            }
+        }
+        if (original == null || !list.equals(original)) XposedHelpers.setStaticObjectField(service, "h",
+                new java.util.concurrent.CopyOnWriteArrayList<>(list));
+    }
+
+    @SuppressWarnings("unchecked")
+    private synchronized void ensureResolutionProfile(String pkg) {
+        Class<?> service = XposedHelpers.findClass("com.vivo.gameassistant.AssistantUIService", loader);
+        // 'i' is the original DEX field name; JADX displays it as f17704i.
+        List<Object> original = (List<Object>)XposedHelpers.getStaticObjectField(service, "i");
+        List<Object> list = original == null ? new ArrayList<>() : new ArrayList<>(original);
+        list.removeIf(item -> syntheticResolution.contains(item)
+                && !allowed((String)XposedHelpers.callMethod(item, "p"), "vsr"));
+        if (allowed(pkg, "vsr")) {
+            boolean present = false;
+            for (Object entry : list) if (pkg.equals(XposedHelpers.callMethod(entry, "p"))) { present = true; break; }
+            if (!present) {
+                Object entry = XposedHelpers.newInstance(XposedHelpers.findClass("n8.e", loader),
+                        pkg, pkg, "#", 1, 30, 60, 0, 0, 47.0d, 44.0d, 47.0d, 44.0d,
+                        Policy.GPU_ROUTE, 0, 0, 0, "");
+                list.add(entry); syntheticResolution.add(entry);
+                once("vsrprofile:" + pkg, "VSR_PROFILE pkg=" + pkg + " high-mode only");
+            }
+        }
+        if (original == null || !list.equals(original)) XposedHelpers.setStaticObjectField(service, "i",
+                new java.util.concurrent.CopyOnWriteArrayList<>(list));
+    }
+
+    private void watchHooks() {
+        // z(String) controls Genshin SDK interpretation, not general admission. Keep it stock.
+        hook("e0.a", "o", new Object[]{int.class, int[].class}, null, p -> {
+            int[] values = (int[])p.args[1];
+            if ((Integer)p.args[0] == 258 && values != null)
+                once("vgpu:" + Arrays.toString(values), "WATCH_VGPU_REQUEST " + Arrays.toString(values)
+                        + " apiReturn=" + p.getResult());
+        });
+    }
+
+    private void systemHooks() {
+        String service = "com.vivo.services.game.GameManagerService";
+        // systemReady runs after provider services are available; all polling is asynchronous.
+        hook(service, "systemReady", new Object[]{}, null, p -> {
+            state.start((Context)XposedHelpers.getObjectField(p.thisObject, "mContext"));
+        });
+        backend("memc", "MEMC", "MEMC", "memc");
+        backend("sr", "VSR", "VSR", "vsr");
+        backend("vaa", "VAA", "VAA", "vaa");
+        genericMemcBackend();
+        auditDispatch(service, "dispatchMEMCEnabled", "memc");
+        auditDispatch(service, "dispatchVSREnabled", "vsr");
+        auditDispatch(service, "dispatchVAAEnabled", "vaa");
+    }
+
+    private void genericMemcBackend() {
+        String controller = "com.vivo.services.game.memc.MEMCController";
+        // For unknown games no vendor SDK event arrives. Use only the real sidebar request's
+        // declared source rate, not an invented measurement or a spoofed Genshin SDK event.
+        hook(controller, "getSdkGameTargetFps", new Object[]{String.class, int.class}, null, p -> {
+            String pkg = (String)p.args[0];
+            if ((Integer)p.getResult() > 0 || !allowed(pkg, "memc")) return;
+            Class<?> parser = XposedHelpers.findClass("com.vivo.services.game.memc.MEMCConfigParser", loader);
+            Map<?, ?> stock = (Map<?, ?>)XposedHelpers.getStaticObjectField(parser, "MEMC_PACKAGE_FPS_CONFIGS");
+            synchronized (stock) { if (stock.containsKey(pkg)) return; }
+            String active = (String)XposedHelpers.getObjectField(p.thisObject, "mCurMEMCPackage");
+            if (!pkg.equals(active)) return;
+            int[] request = (int[])XposedHelpers.getObjectField(p.thisObject, "mValues");
+            if (request != null && request.length >= 5 && request[0] == 1
+                    && request[1] == Policy.GPU_ROUTE && (request[3] == 30 || request[3] == 45 || request[3] == 60))
+                p.setResult(request[3]);
+        });
+        hook("com.vivo.services.game.memc.MEMCConfigParser", "getMEMCFpsForPackage",
+                new Object[]{String.class, int.class, int.class, double.class, boolean.class}, null, p -> {
+            String pkg = (String)p.args[0];
+            int mode = (Integer)p.args[2];
+            if (p.getResult() != null || !allowed(pkg, "memc") || (mode != 1 && mode != 2)) return;
+            // Preserve all existing OEM profiles, including unsupported combinations returning null.
+            Map<?, ?> stock = (Map<?, ?>)XposedHelpers.getStaticObjectField(
+                    p.method.getDeclaringClass(), "MEMC_PACKAGE_FPS_CONFIGS");
+            synchronized (stock) { if (stock.containsKey(pkg)) return; }
+            double temp = (Double)p.args[3];
+            int target = mode == 2 ? 60 : state.policy().targetFps;
+            if (Policy.thermalStopped(genericOverheat.contains(pkg), temp)) genericOverheat.add(pkg);
+            else genericOverheat.remove(pkg);
+            boolean stopped = genericOverheat.contains(pkg);
+            p.setResult(XposedHelpers.newInstance(XposedHelpers.findClass(
+                    "com.vivo.services.game.memc.MEMCConfigParser$MEMCFps", loader),
+                    stopped ? 0 : target/2, stopped ? 0 : target));
+            once("genericbackend:" + pkg + stopped, "MEMC_BACKEND_PROFILE pkg=" + pkg
+                    + " source=" + target/2 + " target=" + target + " thermalStopped=" + stopped);
+        });
+    }
+
+    private void backend(String path, String stem, String flagStem, String feature) {
+        String base = "com.vivo.services.game." + path + ".";
+        String controller = base + stem + "Controller";
+        String parser = base + stem + "ConfigParser";
+        for (String api : new String[]{"Gles", "Vulkan"}) {
+            String flag = "SUPPORT_" + flagStem + "_" + api.toUpperCase(Locale.ROOT);
+            hook(controller, "is" + stem + api + "WhitelistApp", new Object[]{String.class}, null, p -> {
+                String pkg = (String)p.args[0];
+                if (allowed(pkg, feature) && XposedHelpers.getStaticBooleanField(p.thisObject.getClass(), flag)) {
+                    p.setResult(true);
+                    once("backend:" + feature + api + pkg, "BACKEND_ALLOWED " + feature + "/" + api + " pkg=" + pkg);
+                }
+            });
+            hook(parser, "support" + stem + api + "ForCurrentModel", new Object[]{String.class}, null, p -> {
+                if (allowed((String)p.args[0], feature)
+                        && Boolean.TRUE.equals(XposedHelpers.callStaticMethod((Class<?>)p.method.getDeclaringClass(), "support" + stem + api)))
+                    p.setResult(true);
+            });
+        }
+        // Post-processing VSR stays on its OEM profile list; no forced GLES/Vulkan hardware flags.
+    }
+
+    private void auditDispatch(String service, String method, String feature) {
+        hook(service, method, new Object[]{String.class, int.class, int.class, int.class, int.class}, null, p -> {
+            if (allowed((String)p.args[0], feature))
+                once("dispatch:" + method + Arrays.toString(p.args), "NATIVE_DISPATCH " + method + " " + Arrays.toString(p.args));
+        });
+    }
+}

@@ -1,0 +1,498 @@
+{
+  "checks": [
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.utils.f0",
+      "name": "d0",
+      "prototype": "(Lcom/vivo/common/supportlist/pojo/ConfiguredFunction;Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.utils.f0",
+      "name": "F0",
+      "prototype": "(Lcom/vivo/common/supportlist/pojo/ConfiguredFunction;Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.utils.f0",
+      "name": "G0",
+      "prototype": "(Lcom/vivo/gameassistant/homegui/sideslide/controlcenter/switches/model/QuickSwitchItemType;Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.utils.f0",
+      "name": "k0",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.utils.f0",
+      "name": "S0",
+      "prototype": "(Landroid/content/Context;Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.superresolution.i",
+      "name": "K0",
+      "prototype": "(Ljava/lang/String;Z)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.superresolution.m",
+      "name": "f",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.common.utils.f0",
+      "name": "j",
+      "prototype": "(Landroid/content/Context;Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.frameinterpolation.h",
+      "name": "a1",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.frameinterpolation.h",
+      "name": "f0",
+      "prototype": "(Lcom/vivo/gameassistant/frameinterpolation/FrameInterpolationState;Ljava/lang/String;)I",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "m9.j",
+      "name": "s",
+      "prototype": "(Ljava/lang/String;)Lcom/vivo/common/frameintersupportlist/entity/a;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "m9.j",
+      "name": "<init>",
+      "prototype": "()V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.frameinterpolation.k",
+      "name": "k",
+      "prototype": "(Ljava/lang/String;)Lq8/b;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.frameinterpolation.k",
+      "name": "l",
+      "prototype": "(Ljava/lang/String;)Lq8/b;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "m9.d",
+      "name": "l",
+      "prototype": "(IIIILcom/vivo/gameassistant/frameinterpolation/FrameInterpolationState;)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.common.utils.j0",
+      "name": "b",
+      "prototype": "(Landroid/content/Context;ZIIII)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.frameinterpolation.i",
+      "name": "e",
+      "prototype": "()Lcom/vivo/gameassistant/frameinterpolation/i;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.frameinterpolation.i",
+      "name": "h",
+      "prototype": "(IIII)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.o",
+      "name": "V",
+      "prototype": "()Lcom/vivo/gameassistant/o;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.gameassistant.o",
+      "name": "O0",
+      "prototype": "()Ljava/lang/String;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "q8.b",
+      "name": "<init>",
+      "prototype": "()V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "q8.b",
+      "name": "l",
+      "prototype": "(I)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "q8.b",
+      "name": "m",
+      "prototype": "(Z)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "s7.b",
+      "name": "<init>",
+      "prototype": "(III)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.common.frameintersupportlist.entity.a",
+      "name": "<init>",
+      "prototype": "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IZLjava/util/List;Ljava/util/List;Ljava/util/Map;DDII)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.common.frameintersupportlist.entity.a",
+      "name": "k",
+      "prototype": "()Ljava/lang/String;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "n8.e",
+      "name": "<init>",
+      "prototype": "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIIIIDDDDIIIILjava/lang/String;)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "n8.e",
+      "name": "p",
+      "prototype": "()Ljava/lang/String;",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.gameassistant.AssistantUIService",
+      "name": "h",
+      "type": "Ljava/util/List;",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.gameassistant.AssistantUIService",
+      "name": "i",
+      "type": "Ljava/util/List;",
+      "passed": true
+    },
+    {
+      "kind": "enum",
+      "class": "Lcom/vivo/common/supportlist/pojo/ConfiguredFunction;",
+      "passed": true
+    },
+    {
+      "kind": "enum",
+      "class": "Lcom/vivo/gameassistant/homegui/sideslide/controlcenter/switches/model/QuickSwitchItemType;",
+      "passed": true
+    },
+    {
+      "kind": "enum",
+      "class": "Lcom/vivo/gameassistant/frameinterpolation/FrameInterpolationState;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "e0.a",
+      "name": "o",
+      "prototype": "(I[I)I",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.GameManagerService",
+      "name": "systemReady",
+      "prototype": "()V",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.GameManagerService",
+      "name": "mContext",
+      "type": "Landroid/content/Context;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.GameManagerService",
+      "name": "dispatchMEMCEnabled",
+      "prototype": "(Ljava/lang/String;IIII)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.GameManagerService",
+      "name": "dispatchVSREnabled",
+      "prototype": "(Ljava/lang/String;IIII)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.GameManagerService",
+      "name": "dispatchVAAEnabled",
+      "prototype": "(Ljava/lang/String;IIII)V",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "isMEMCGlesWhitelistApp",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "SUPPORT_MEMC_GLES",
+      "type": "Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser",
+      "name": "supportMEMCGlesForCurrentModel",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser",
+      "name": "supportMEMCGles",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "isMEMCVulkanWhitelistApp",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "SUPPORT_MEMC_VULKAN",
+      "type": "Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser",
+      "name": "supportMEMCVulkanForCurrentModel",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser",
+      "name": "supportMEMCVulkan",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.sr.VSRController",
+      "name": "isVSRGlesWhitelistApp",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.sr.VSRController",
+      "name": "SUPPORT_VSR_GLES",
+      "type": "Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.sr.VSRConfigParser",
+      "name": "supportVSRGlesForCurrentModel",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.sr.VSRConfigParser",
+      "name": "supportVSRGles",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.sr.VSRController",
+      "name": "isVSRVulkanWhitelistApp",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.sr.VSRController",
+      "name": "SUPPORT_VSR_VULKAN",
+      "type": "Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.sr.VSRConfigParser",
+      "name": "supportVSRVulkanForCurrentModel",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.sr.VSRConfigParser",
+      "name": "supportVSRVulkan",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.vaa.VAAController",
+      "name": "isVAAGlesWhitelistApp",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.vaa.VAAController",
+      "name": "SUPPORT_VAA_GLES",
+      "type": "Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.vaa.VAAConfigParser",
+      "name": "supportVAAGlesForCurrentModel",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.vaa.VAAConfigParser",
+      "name": "supportVAAGles",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.vaa.VAAController",
+      "name": "isVAAVulkanWhitelistApp",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.vaa.VAAController",
+      "name": "SUPPORT_VAA_VULKAN",
+      "type": "Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.vaa.VAAConfigParser",
+      "name": "supportVAAVulkanForCurrentModel",
+      "prototype": "(Ljava/lang/String;)Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.vaa.VAAConfigParser",
+      "name": "supportVAAVulkan",
+      "prototype": "()Z",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "getSdkGameTargetFps",
+      "prototype": "(Ljava/lang/String;I)I",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "mCurMEMCPackage",
+      "type": "Ljava/lang/String;",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.memc.MEMCController",
+      "name": "mValues",
+      "type": "[I",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser",
+      "name": "getMEMCFpsForPackage",
+      "prototype": "(Ljava/lang/String;IIDZ)Lcom/vivo/services/game/memc/MEMCConfigParser$MEMCFps;",
+      "passed": true
+    },
+    {
+      "kind": "method",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser$MEMCFps",
+      "name": "<init>",
+      "prototype": "(II)V",
+      "passed": true
+    },
+    {
+      "kind": "field",
+      "class": "com.vivo.services.game.memc.MEMCConfigParser",
+      "name": "MEMC_PACKAGE_FPS_CONFIGS",
+      "type": "Ljava/util/HashMap;",
+      "passed": true
+    }
+  ],
+  "passed": 69,
+  "total": 69,
+  "artifacts": [
+    {
+      "path": "F:\\Reserve_Engineer\\AReverse-Project\\vivomodapk\\investigation_game_20261021\\apks\\com.vivo.gamecube\\base.apk",
+      "sha256": "4ca9d9d8401b6cff44635e194150f2410a5de7a5bc584e8bbcef681b5498943f"
+    },
+    {
+      "path": "F:\\Reserve_Engineer\\AReverse-Project\\vivomodapk\\investigation_game_20261021\\apks\\com.vivo.gamewatch\\GameWatch.apk",
+      "sha256": "496d3312bf2e52dde56051deeab503306c76d413ea3d50593285dda50b7282c9"
+    },
+    {
+      "path": "F:\\Reserve_Engineer\\AReverse-Project\\vivomodapk\\Game-Module\\research\\vivo-services.jar",
+      "sha256": "a3d6d078557165d41df1a93318b3cde1b752a7f9f605edb0c3409a0e7e38c460"
+    }
+  ],
+  "scope": "Declared DEX method/field signatures and enum parents. Not runtime hook execution."
+}

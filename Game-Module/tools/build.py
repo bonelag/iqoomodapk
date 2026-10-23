@@ -96,7 +96,7 @@ def main():
         for prefix in ['app', 'tools', 'tests', 'vendor']:
             for p in (ROOT/prefix).rglob('*'):
                 if p.is_file() and '__pycache__' not in p.parts: z.write(p, p.relative_to(ROOT).as_posix())
-        for name in ['README.md','build.ps1','.gitignore','research/HOOKS.md','research/FIX-0.1.1.md','research/FIX-0.1.2.md','research/FIX-0.1.3.md']:
+        for name in ['README.md','build.ps1','.gitignore','research/HOOKS.md','research/FIX-0.1.1.md','research/FIX-0.1.2.md','research/FIX-0.1.3.md','research/FIX-0.1.4.md']:
             z.write(ROOT/name, name)
     print('APK: '+str(apk))
     print('SHA256: '+sha)

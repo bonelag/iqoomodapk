@@ -6,7 +6,7 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 
 final class ConfigStore {
-    static final String[] FLAGS = {"enabled", "all_apps", "memc", "vsr", "vaa"};
+    static final String[] FLAGS = {"enabled", "memc", "vsr"};
     private ConfigStore() { }
     static synchronized SharedPreferences preferences(Context ctx) {
         Context storage = ctx.createDeviceProtectedStorageContext();
@@ -25,10 +25,8 @@ final class ConfigStore {
     static Bundle read(SharedPreferences p) {
         Bundle b = new Bundle();
         b.putInt("protocol", 1);
-        for (String key : FLAGS) b.putBoolean(key, !"vaa".equals(key) && p.getBoolean(key, true));
+        for (String key : FLAGS) b.putBoolean(key, p.getBoolean(key, true));
         b.putInt("target_fps", p.getInt("target_fps", 120));
-        b.putString("selected", ConfigContract.limited(p.getString("selected", "")));
-        b.putString("excluded", ConfigContract.limited(p.getString("excluded", "")));
         b.putLong("revision", p.getLong("revision", 0));
         return b;
     }
@@ -36,8 +34,6 @@ final class ConfigStore {
         SharedPreferences.Editor e = p.edit().putBoolean("received", true);
         for (String key : FLAGS) e.putBoolean(key, b.getBoolean(key, true));
         e.putInt("target_fps", b.getInt("target_fps", 120))
-                .putString("selected", ConfigContract.limited(b.getString("selected", "")))
-                .putString("excluded", ConfigContract.limited(b.getString("excluded", "")))
                 .putLong("revision", b.getLong("revision", 0)).apply();
     }
     static void publish(Context ctx) {

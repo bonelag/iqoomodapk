@@ -52,7 +52,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         if (!TARGET_FINGERPRINT.equals(Build.FINGERPRINT)) {
             once("rom", "UNSUPPORTED_ROM " + Build.FINGERPRINT); return;
         }
-        log("LOAD version=0.1.3 package=" + lp.packageName + " process=" + process);
+        log("LOAD version=0.1.4 package=" + lp.packageName + " process=" + process);
         if (("android".equals(lp.packageName) || "system".equals(lp.packageName))
                 && ("android".equals(process) || "system".equals(process) || "system_server".equals(process))) {
             systemHooks();

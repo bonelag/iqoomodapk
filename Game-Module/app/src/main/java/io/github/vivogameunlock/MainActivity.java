@@ -16,7 +16,6 @@ public final class MainActivity extends Activity {
     private static final int INK = 0xff172e2b, MUTED = 0xff62746f, ACCENT = 0xff176e5b;
     private SharedPreferences prefs;
     private LinearLayout body;
-    private EditText selected, excluded;
     private Spinner fps;
     private boolean vietnamese;
 
@@ -81,7 +80,7 @@ public final class MainActivity extends Activity {
                     if (vietnamese != (which == 1)) recreate();
                 }).setNegativeButton(tr("Cancel", "Hủy"), null).show());
         text(body, "Game Unlock", 34, INK, true);
-        text(body, tr("Tune your gaming experience · 0.1.3", "Điều chỉnh trải nghiệm chơi game · 0.1.3"), 14, MUTED, false);
+        text(body, tr("Tune your gaming experience · 0.1.4", "Điều chỉnh trải nghiệm chơi game · 0.1.4"), 14, MUTED, false);
 
         LinearLayout device = card(tr("Device", "Thiết bị"));
         text(device, Build.MODEL + " / " + Build.DEVICE, 21, INK, true);
@@ -114,18 +113,9 @@ public final class MainActivity extends Activity {
         fps.setSelection(value == 60 ? 0 : value == 90 ? 1 : 2);
         frames.addView(fps, new LinearLayout.LayoutParams(-1, dp(56)));
 
-        LinearLayout apps = card(tr("Applications", "Ứng dụng"));
-        toggle(apps, "all_apps", tr("All applications", "Mọi ứng dụng"), tr("In vivo Game Mode", "Trong Game Mode của vivo"), true);
-        String allowlist = tr("Allowed packages", "Danh sách cho phép");
-        TextView selectedLabel = text(apps, allowlist, 15, INK, true);
-        text(apps, tr("When All applications is off · One package per line", "Dùng khi tắt Mọi ứng dụng · Mỗi dòng một package"), 12, MUTED, false);
-        selected = input(apps, prefs.getString("selected", ""), allowlist);
-        selectedLabel.setLabelFor(selected.getId());
-        String exclusions = tr("Excluded packages", "Danh sách loại trừ");
-        TextView excludedLabel = text(apps, exclusions, 15, INK, true);
-        text(apps, tr("Keep the original vivo configuration", "Giữ cấu hình gốc của vivo"), 12, MUTED, false);
-        excluded = input(apps, prefs.getString("excluded", ""), exclusions);
-        excludedLabel.setLabelFor(excluded.getId());
+        LinearLayout apps = card(tr("Games", "Trò chơi"));
+        text(apps, tr("Applies automatically to games enabled in Super game mode → Supported games. No other app is touched.",
+                "Tự động áp dụng cho các trò chơi bật trong Chế độ siêu trò chơi → Các trò chơi được hỗ trợ. Không động tới ứng dụng khác."), 14, MUTED, false);
 
         fps.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -136,20 +126,7 @@ public final class MainActivity extends Activity {
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
-        watch(selected, "selected");
-        watch(excluded, "excluded");
         ConfigStore.publish(this);
-    }
-
-    private void watch(EditText field, String key) {
-        field.addTextChangedListener(new android.text.TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                prefs.edit().putString(key, ConfigContract.limited(s.toString())).apply();
-                ConfigStore.publish(MainActivity.this);
-            }
-            @Override public void afterTextChanged(android.text.Editable s) { }
-        });
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -207,30 +184,4 @@ public final class MainActivity extends Activity {
         return view;
     }
 
-    private EditText input(LinearLayout parent, String value, String label) {
-        EditText view = new EditText(this);
-        view.setId(View.generateViewId());
-        view.setText(value);
-        view.setTextColor(INK);
-        view.setHintTextColor(MUTED);
-        view.setTextSize(14);
-        view.setTypeface(Typeface.MONOSPACE);
-        view.setMinLines(2);
-        view.setGravity(Gravity.TOP | Gravity.START);
-        view.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        view.setHint("com.example.game");
-        view.setContentDescription(label);
-        view.setPadding(dp(12), dp(12), dp(12), dp(12));
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(0xfff2f5f1);
-        background.setCornerRadius(dp(12));
-        background.setStroke(dp(1), 0xffd8e2da);
-        view.setBackground(background);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(8);
-        params.bottomMargin = dp(12);
-        parent.addView(view, params);
-        return view;
-    }
 }

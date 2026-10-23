@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('apk', nargs='?', type=Path, default=ROOT/'dist/VivoGameUnlock-0.1.3.apk')
+    parser.add_argument('apk', nargs='?', type=Path, default=ROOT/'dist/VivoGameUnlock-0.1.4.apk')
     args = parser.parse_args()
     checks = []
     def check(value, name):

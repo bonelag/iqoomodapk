@@ -7,6 +7,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.database.ContentObserver;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -18,17 +21,19 @@ import java.util.Set;
 
 /** Provider and package-manager work happens only on a dedicated background thread. */
 final class RuntimeState {
+    /** GameCube "Supported games" list: the only source of packages this module may admit. */
+    static final Uri SUPPORT_GAMES = Uri.parse("content://com.vivo.gamecube.provider/support_game");
     private volatile Policy policy = closed();
     private volatile String packageList = "";
     private volatile boolean started;
-    private Set<String> installed = Collections.emptySet();
-    private long lastPackageScan;
+    private Set<String> games = Collections.emptySet();
+    private long lastGameScan;
     private boolean unavailableLogged;
     private Bundle received;
     private SharedPreferences cache;
 
     static Policy closed() {
-        return new Policy(false, false, false, false, false, 120, "", "", Collections.emptySet());
+        return new Policy(false, false, false, 120, Collections.<String>emptySet());
     }
     Policy policy() { return policy; }
     String packages() { return packageList; }
@@ -66,21 +71,34 @@ final class RuntimeState {
                 GameUnlock.log("CONFIG_RECEIVER_READY host=" + ctx.getPackageName());
             } catch (Throwable t) { GameUnlock.log("CONFIG_RECEIVER_ERROR: " + t); }
             request(ctx);
+            // system_server runs as package "android", which has no data directory for preferences.
+            if (!"android".equals(ctx.getPackageName())) {
+                try {
+                    cache = ctx.createDeviceProtectedStorageContext().getSharedPreferences(ConfigContract.CACHE, 0);
+                    if (cache.getBoolean("received", false)) {
+                        received = ConfigStore.read(cache);
+                        apply(ctx, received);
+                    }
+                } catch (Throwable t) { GameUnlock.log("CONFIG_CACHE_ERROR: " + t); }
+            }
             try {
-                cache = ctx.createDeviceProtectedStorageContext().getSharedPreferences(ConfigContract.CACHE, 0);
-                if (cache.getBoolean("received", false)) {
-                    received = ConfigStore.read(cache);
-                    apply(ctx, received);
-                }
-            } catch (Throwable t) { GameUnlock.log("CONFIG_CACHE_ERROR: " + t); }
-            IntentFilter events = new IntentFilter(Intent.ACTION_USER_UNLOCKED);
-            ctx.registerReceiver(new BroadcastReceiver() {
-                @Override public void onReceive(Context c, Intent i) {
-                    lastPackageScan = 0;
-                    request(ctx);
-                    if (received != null) apply(ctx, received);
-                }
-            }, events, null, handler);
+                ctx.getContentResolver().registerContentObserver(SUPPORT_GAMES, true, new ContentObserver(handler) {
+                    @Override public void onChange(boolean selfChange) {
+                        lastGameScan = 0;
+                        if (received != null) apply(ctx, received);
+                    }
+                });
+            } catch (Throwable t) { GameUnlock.log("GAMES_OBSERVER_ERROR: " + t); }
+            try {
+                IntentFilter events = new IntentFilter(Intent.ACTION_USER_UNLOCKED);
+                ctx.registerReceiver(new BroadcastReceiver() {
+                    @Override public void onReceive(Context c, Intent i) {
+                        lastGameScan = 0;
+                        request(ctx);
+                        if (received != null) apply(ctx, received);
+                    }
+                }, events, null, handler);
+            } catch (Throwable t) { GameUnlock.log("UNLOCK_RECEIVER_ERROR: " + t); }
         });
         handler.post(new Runnable() {
             @Override public void run() {
@@ -116,26 +134,37 @@ final class RuntimeState {
         } catch (Throwable t) { GameUnlock.log("CONFIG_REQUEST_ERROR: " + t); }
     }
 
-    private void apply(Context ctx, Bundle b) {
-        if (lastPackageScan == 0 || SystemClock.elapsedRealtime() - lastPackageScan > 60000) {
-            try {
-                Set<String> next = new HashSet<>();
-                for (ApplicationInfo ai : ctx.getPackageManager().getInstalledApplications(0)) {
+    /** Reads enabled games from GameCube; on any failure keeps the previous list. */
+    private void scanGames(Context ctx) {
+        try (Cursor c = ctx.getContentResolver().query(SUPPORT_GAMES, null, null, null, null)) {
+            if (c == null) return;
+            int col = c.getColumnIndex("package_name");
+            if (col < 0) return;
+            Set<String> next = new HashSet<>();
+            while (c.moveToNext()) {
+                String pkg = c.getString(col);
+                if (pkg == null || Policy.MODULE.equals(pkg)) continue;
+                try {
+                    ApplicationInfo ai = ctx.getPackageManager().getApplicationInfo(pkg, 0);
                     if (ai.enabled && ai.uid % 100000 >= 10000 && (ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0)
-                        next.add(ai.packageName);
-                }
-                installed = next;
-                lastPackageScan = SystemClock.elapsedRealtime();
-            } catch (Throwable t) { GameUnlock.log("CONFIG_PACKAGES_ERROR: " + t); }
-        }
-        Policy next = new Policy(b.getBoolean("enabled", true), b.getBoolean("all_apps", true),
-                b.getBoolean("memc", true), b.getBoolean("vsr", true), b.getBoolean("vaa", true),
-                b.getInt("target_fps", 120), b.getString("selected", ""), b.getString("excluded", ""), installed);
+                        next.add(pkg);
+                } catch (Throwable notInstalled) { }
+            }
+            games = next;
+            lastGameScan = SystemClock.elapsedRealtime();
+        } catch (Throwable t) { GameUnlock.log("GAMES_SCAN_ERROR host=" + ctx.getPackageName() + ": " + t); }
+    }
+
+    private void apply(Context ctx, Bundle b) {
+        if (lastGameScan == 0 || SystemClock.elapsedRealtime() - lastGameScan > 10000) scanGames(ctx);
+        Policy next = new Policy(b.getBoolean("enabled", true), b.getBoolean("memc", true),
+                b.getBoolean("vsr", true), b.getInt("target_fps", 120), games);
         java.util.List<String> names = new java.util.ArrayList<>(next.packages());
         Collections.sort(names);
-        packageList = android.text.TextUtils.join(";", names);
-        boolean first = !policy.enabled && next.enabled;
+        String joined = android.text.TextUtils.join(";", names);
+        boolean changed = !joined.equals(packageList) || policy.enabled != next.enabled;
+        packageList = joined;
         policy = next;
-        if (first) GameUnlock.log("CONFIG_READY host=" + ctx.getPackageName() + " candidates=" + names.size() + " target=" + next.targetFps);
+        if (changed) GameUnlock.log("CONFIG_READY host=" + ctx.getPackageName() + " games=" + names + " target=" + next.targetFps);
     }
 }

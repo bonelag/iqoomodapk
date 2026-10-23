@@ -8,37 +8,24 @@ import java.util.Set;
 public final class Policy {
     public static final String MODULE = "io.github.vivogameunlock";
     public static final int GPU_ROUTE = 3;
-    public final boolean enabled, allApps, memc, vsr, vaa;
+    public final boolean enabled, memc, vsr;
     public final int targetFps;
-    private final Set<String> selected, excluded, installed;
+    private final Set<String> games;
 
-    public Policy(boolean enabled, boolean allApps, boolean memc, boolean vsr, boolean vaa,
-                  int targetFps, String selected, String excluded, Set<String> installed) {
-        this.enabled = enabled; this.allApps = allApps;
+    /** games = packages the user enabled in GameCube "Supported games". Nothing else is ever admitted. */
+    public Policy(boolean enabled, boolean memc, boolean vsr, int targetFps, Set<String> games) {
+        this.enabled = enabled;
         this.memc = memc; this.vsr = vsr;
-        // Ignore legacy VAA preferences, including cached configuration from older scopes.
-        this.vaa = false;
         this.targetFps = targetFps == 60 || targetFps == 90 || targetFps == 120 ? targetFps : 120;
-        this.selected = parse(selected); this.excluded = parse(excluded);
-        this.installed = Collections.unmodifiableSet(new HashSet<>(installed));
-    }
-
-    public static Set<String> parse(String text) {
-        Set<String> result = new HashSet<>();
-        if (text != null) for (String s : text.split("[\\s,;]+"))
-            if (s.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")) result.add(s);
-        return result;
+        this.games = Collections.unmodifiableSet(new HashSet<>(games));
     }
 
     public boolean allows(String pkg) {
-        return enabled && pkg != null && !MODULE.equals(pkg) && installed.contains(pkg)
-                && !excluded.contains(pkg) && (allApps || selected.contains(pkg));
+        return enabled && pkg != null && !MODULE.equals(pkg) && games.contains(pkg);
     }
 
     public Set<String> packages() {
-        Set<String> result = new HashSet<>();
-        for (String pkg : installed) if (allows(pkg)) result.add(pkg);
-        return result;
+        return enabled ? games : Collections.<String>emptySet();
     }
 
     public static boolean thermalStopped(boolean previous, double temperature) {

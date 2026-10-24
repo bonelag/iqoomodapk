@@ -56,18 +56,18 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         if (("android".equals(lp.packageName) || "system".equals(lp.packageName))
                 && ("android".equals(process) || "system".equals(process) || "system_server".equals(process))) {
             systemHooks();
-        } else if ("com.vivo.gamecube".equals(lp.packageName) || "com.vivo.gamewatch".equals(lp.packageName)) {
-            hook(Application.class, "attach", new Object[]{Context.class}, null, p -> {
-                Context ctx = (Context)p.args[0];
+        } else if (("com.vivo.gamecube".equals(lp.packageName) && !"com.vivo.gamecube:daemon".equals(process))
+                || "com.vivo.gamewatch".equals(lp.packageName)) {
+            hook(Application.class, "onCreate", new Object[]{}, null, p -> {
+                Context ctx = (Context)p.thisObject;
                 if (!lp.packageName.equals(ctx.getPackageName())) return;
                 long code = ctx.getPackageManager().getPackageInfo(lp.packageName, 0).getLongVersionCode();
                 long expected = "com.vivo.gamecube".equals(lp.packageName) ? 1401000 : 250003;
                 if (code != expected) { once("version", "UNSUPPORTED_VERSION " + code); return; }
-                // Bind app hooks to the application Context's loader after attach completes.
-                // A load-package entry may also be used for dependency/resource package loads.
+                // Bind app hooks in Application.onCreate after LoadedApk.mApplication and providers are ready.
                 GameUnlock appSession = new GameUnlock(ctx.getClassLoader(), process);
-                appSession.state.start(ctx);
                 if ("com.vivo.gamecube".equals(lp.packageName)) appSession.cubeHooks(); else appSession.watchHooks();
+                appSession.state.start(ctx);
             });
         }
     }
@@ -138,7 +138,30 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         hook("com.vivo.gameassistant.frameinterpolation.h", "f0", new Object[]{
                 "com.vivo.gameassistant.frameinterpolation.FrameInterpolationState", String.class}, p -> {
             ensureFrameProfile((String)p.args[1]);
+        }, p -> {
+            if ((Integer)p.getResult() > 0 || p.args[0] == null || !allowed((String)p.args[1], "memc")) return;
+            String mode = ((Enum<?>)p.args[0]).name();
+            if ("BOOST_FRAME".equals(mode)) p.setResult(state.policy().targetFps);
+            else if ("OPTIMIZE_POWER_CONSUMPTION".equals(mode)) p.setResult(60);
+        });
+        hook("com.vivo.gameassistant.frameinterpolation.h", "J0", new Object[]{}, p -> {
+            if (allowed(foreground(), "memc")) XposedHelpers.setIntField(p.thisObject, "F", 0);
         }, null);
+        hook("l9.b", "g", new Object[]{}, null, p -> {
+            if (Boolean.TRUE.equals(p.getResult()) || !allowed(foreground(), "memc")) return;
+            XposedHelpers.callMethod(p.thisObject, "l", -1);
+            if ((Integer)XposedHelpers.callMethod(p.thisObject, "c") > 0) p.setResult(true);
+        });
+        hook("l9.b", "f", new Object[]{boolean.class}, null, p -> {
+            if (!allowed(foreground(), "memc")) return;
+            XposedHelpers.callMethod(p.thisObject, "l", -1);
+            int fps = (Integer)XposedHelpers.callMethod(p.thisObject, "c");
+            if (fps > 0) {
+                Float value = (float)fps;
+                XposedHelpers.setObjectField(p.thisObject, "e", value);
+                p.setResult(value);
+            }
+        });
         hook(util, "S0", new Object[]{Context.class, String.class}, p -> {
             ensureResolutionProfile((String)p.args[1]);
         }, null); // Keep the OEM hardware-capability gate in S0.
@@ -417,9 +440,6 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         hook(controller, "getSdkGameTargetFps", new Object[]{String.class, int.class}, null, p -> {
             String pkg = (String)p.args[0];
             if ((Integer)p.getResult() > 0 || !allowed(pkg, "memc")) return;
-            Class<?> parser = XposedHelpers.findClass("com.vivo.services.game.memc.MEMCConfigParser", loader);
-            Map<?, ?> stock = (Map<?, ?>)XposedHelpers.getStaticObjectField(parser, "MEMC_PACKAGE_FPS_CONFIGS");
-            synchronized (stock) { if (stock.containsKey(pkg)) return; }
             String active = (String)XposedHelpers.getObjectField(p.thisObject, "mCurMEMCPackage");
             if (!pkg.equals(active)) return;
             int[] request = (int[])XposedHelpers.getObjectField(p.thisObject, "mValues");
@@ -427,15 +447,24 @@ public final class GameUnlock implements IXposedHookLoadPackage {
                     && request[1] == Policy.GPU_ROUTE && (request[3] == 30 || request[3] == 45 || request[3] == 60))
                 p.setResult(request[3]);
         });
+        hook(controller, "updateNoErrorState", new Object[]{}, null, p -> {
+            if (XposedHelpers.getBooleanField(p.thisObject, "mNoError")) return;
+            if (XposedHelpers.getIntField(p.thisObject, "mMEMCGlesRunning") <= 0
+                    && XposedHelpers.getIntField(p.thisObject, "mMEMCVulkanRunning") <= 0) return;
+            String pkg = (String)XposedHelpers.getObjectField(p.thisObject, "mCurMEMCPackage");
+            if (!allowed(pkg, "memc")) return;
+            if (XposedHelpers.getIntField(p.thisObject, "mCurMEMCPid") <= 0) {
+                int[] request = (int[])XposedHelpers.getObjectField(p.thisObject, "mValues");
+                if (request != null && request.length >= 3 && request[0] == 1 && request[2] > 0)
+                    XposedHelpers.setIntField(p.thisObject, "mCurMEMCPid", request[2]);
+            }
+            XposedHelpers.setBooleanField(p.thisObject, "mNoError", true);
+        });
         hook("com.vivo.services.game.memc.MEMCConfigParser", "getMEMCFpsForPackage",
                 new Object[]{String.class, int.class, int.class, double.class, boolean.class}, null, p -> {
             String pkg = (String)p.args[0];
             int mode = (Integer)p.args[2];
             if (p.getResult() != null || !allowed(pkg, "memc") || (mode != 1 && mode != 2)) return;
-            // Preserve all existing OEM profiles, including unsupported combinations returning null.
-            Map<?, ?> stock = (Map<?, ?>)XposedHelpers.getStaticObjectField(
-                    p.method.getDeclaringClass(), "MEMC_PACKAGE_FPS_CONFIGS");
-            synchronized (stock) { if (stock.containsKey(pkg)) return; }
             double temp = (Double)p.args[3];
             int target = mode == 2 ? 60 : state.policy().targetFps;
             if (Policy.thermalStopped(genericOverheat.contains(pkg), temp)) genericOverheat.add(pkg);
@@ -443,7 +472,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
             boolean stopped = genericOverheat.contains(pkg);
             p.setResult(XposedHelpers.newInstance(XposedHelpers.findClass(
                     "com.vivo.services.game.memc.MEMCConfigParser$MEMCFps", loader),
-                    stopped ? 0 : target/2, stopped ? 0 : target));
+                    stopped ? 0 : target, stopped ? 0 : target));
             once("genericbackend:" + pkg + stopped, "MEMC_BACKEND_PROFILE pkg=" + pkg
                     + " source=" + target/2 + " target=" + target + " thermalStopped=" + stopped);
         });

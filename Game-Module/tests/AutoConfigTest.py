@@ -29,6 +29,8 @@ assert 'all_apps' not in ui + store + runtime
 assert 'allApps' not in policy
 # system_server (package "android") has no data dir for SharedPreferences.
 assert '!"android".equals(ctx.getPackageName())' in runtime
+assert 'isUserUnlocked()' in runtime
+assert '"attach"' not in (java / 'GameUnlock.java').read_text(encoding='utf-8')
 android = '{http://schemas.android.com/apk/res/android}'
 app = ET.parse(root / 'app/src/main/AndroidManifest.xml').getroot().find('application')
 for name in ('.ConfigProvider', '.ConfigRequestReceiver'):

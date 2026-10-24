@@ -136,6 +136,8 @@ final class RuntimeState {
 
     /** Reads enabled games from GameCube; on any failure keeps the previous list. */
     private void scanGames(Context ctx) {
+        android.os.UserManager um = ctx.getSystemService(android.os.UserManager.class);
+        if (um != null && !um.isUserUnlocked()) return;
         try (Cursor c = ctx.getContentResolver().query(SUPPORT_GAMES, null, null, null, null)) {
             if (c == null) return;
             int col = c.getColumnIndex("package_name");

@@ -181,6 +181,11 @@ def main():
             field(framework,base+stem+'Controller','SUPPORT_'+stem+'_'+api.upper(),'Z',True)
             method(framework,base+stem+'ConfigParser','support'+stem+api+'ForCurrentModel','('+S+')Z',True)
             method(framework,base+stem+'ConfigParser','support'+stem+api,'()Z',True)
+    sr_controller = 'com.vivo.services.game.sr.VSRController'
+    method(framework,sr_controller,'isVSRPostProcessingWhitelistApp','('+S+')Z')
+    field(framework,sr_controller,'SUPPORT_VSR_POST_PROCESSING','Z',True)
+    method(framework,'com.vivo.services.game.sr.VSRConfigParser','supportVSRPostProcessingForCurrentModel','('+S+')Z',True)
+    method(framework,'com.vivo.services.game.sr.VSRConfigParser','supportVSRPostProcessing','()Z',True)
     memc = 'com.vivo.services.game.memc.'
     method(framework,memc+'MEMCController','getSdkGameTargetFps','('+S+'I)I')
     method(framework,memc+'MEMCController','updateNoErrorState','()V')

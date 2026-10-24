@@ -52,7 +52,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         if (!TARGET_FINGERPRINT.equals(Build.FINGERPRINT)) {
             once("rom", "UNSUPPORTED_ROM " + Build.FINGERPRINT); return;
         }
-        log("LOAD version=0.1.4 package=" + lp.packageName + " process=" + process);
+        log("LOAD version=0.1.5 package=" + lp.packageName + " process=" + process);
         if (("android".equals(lp.packageName) || "system".equals(lp.packageName))
                 && ("android".equals(process) || "system".equals(process) || "system_server".equals(process))) {
             systemHooks();
@@ -64,7 +64,6 @@ public final class GameUnlock implements IXposedHookLoadPackage {
                 long code = ctx.getPackageManager().getPackageInfo(lp.packageName, 0).getLongVersionCode();
                 long expected = "com.vivo.gamecube".equals(lp.packageName) ? 1401000 : 250003;
                 if (code != expected) { once("version", "UNSUPPORTED_VERSION " + code); return; }
-                // Bind app hooks in Application.onCreate after LoadedApk.mApplication and providers are ready.
                 GameUnlock appSession = new GameUnlock(ctx.getClassLoader(), process);
                 if ("com.vivo.gamecube".equals(lp.packageName)) appSession.cubeHooks(); else appSession.watchHooks();
                 appSession.state.start(ctx);
@@ -164,7 +163,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         });
         hook(util, "S0", new Object[]{Context.class, String.class}, p -> {
             ensureResolutionProfile((String)p.args[1]);
-        }, null); // Keep the OEM hardware-capability gate in S0.
+        }, null);
         hook("com.vivo.gameassistant.superresolution.i", "K0", new Object[]{String.class, boolean.class}, p -> {
             ensureResolutionProfile((String)p.args[0]);
             bindResolutionStrategy(p.thisObject, (String)p.args[0]);
@@ -262,55 +261,53 @@ public final class GameUnlock implements IXposedHookLoadPackage {
 
     private void graphicsHooks() {
         String sr = "com.vivo.gameassistant.superresolution.i";
-        // Unknown games have no AISR/SDK conflict metadata. Use the OEM high-mode
-        // command directly, retaining its real result and all native admission checks.
         hook(sr, "l1", new Object[]{int.class}, p -> {
-            String pkg = foreground();
-            ensureResolutionProfile(pkg);
-            if (!directResolution(pkg)) return;
             Object controller = p.thisObject;
             Context ctx = (Context)XposedHelpers.getObjectField(controller, "a");
+            String pkg = foreground();
+            if (pkg == null || !allowed(pkg, "vsr")) return;
+
+            ensureResolutionProfile(pkg);
+            if (!directResolution(pkg)) return;
+            bindResolutionStrategy(controller, pkg);
+
             int mode = (Integer)p.args[0];
             int previous = (Integer)XposedHelpers.callMethod(preferences(), "e", ctx, pkg);
+
             String reason = null;
             if (!pkg.equals(XposedHelpers.getObjectField(controller, "k"))) reason = "foreground_mismatch";
             else if (mode != 0 && mode != 1) reason = "unsupported_mode";
             else if (algorithmBlocked(ctx, pkg, "vsr_controlled")) reason = "algorithm_pending";
             else if (!Boolean.TRUE.equals(XposedHelpers.callStaticMethod(XposedHelpers.findClass(
                     "com.vivo.gameassistant.utils.f0", loader), "S0", ctx, pkg))) reason = "hardware_gate";
-            if (reason == null) {
-                bindResolutionStrategy(controller, pkg);
+            else {
                 XposedHelpers.callMethod(controller, "P0");
                 XposedHelpers.callMethod(controller, "O0");
                 boolean hot = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "a1", mode));
                 double temperature = XposedHelpers.getDoubleField(controller, "C");
-                if (mode == 1 && (hot || !Double.isFinite(temperature) || temperature <= 0)) reason = "thermal_gate";
+                if (mode > 0 && (hot || !Double.isFinite(temperature) || temperature <= 0)) reason = "thermal_gate";
             }
+
             boolean success = false;
             if (reason == null) {
-                if (genericResolution(pkg) != null) {
-                    success = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "w1", ctx, pkg, mode == 1, true));
-                } else {
-                    // International Genshin has a stock profile, but does not reliably
-                    // deliver the Chinese G_RenderResolution SDK event required by l1.
-                    // Send VSR only: do not invent that SDK value or alter MEMC rates.
-                    success = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "v1", ctx, pkg, mode == 1, false));
-                    if (success) {
-                        XposedHelpers.callMethod(preferences(), "l", ctx, pkg, mode);
-                        XposedHelpers.callMethod(controller, "n1", mode);
-                    }
-                }
+                // w1 also sends an interpolation request; keep VSR independent of MEMC.
+                success = Boolean.TRUE.equals(XposedHelpers.callMethod(controller, "v1", ctx, pkg, mode == 1, false));
                 if (success) {
-                    XposedHelpers.setBooleanField(controller, "b", mode == 1);
+                    XposedHelpers.callMethod(preferences(), "l", ctx, pkg, mode);
+                    XposedHelpers.setBooleanField(controller, "b", mode > 0);
                     XposedHelpers.setBooleanField(controller, "l", false);
                     XposedHelpers.callMethod(controller, "J1", mode, pkg);
+                    XposedHelpers.callMethod(controller, "n1", mode);
+                } else {
+                    reason = "command_rejected";
                 }
-                else reason = "command_rejected";
             }
+
             int stored = (Integer)XposedHelpers.callMethod(preferences(), "e", ctx, pkg);
             log(process + " VSR_SELECTION pkg=" + pkg + " mode=" + mode + " previous=" + previous
                     + " accepted=" + success + " stored=" + stored + " reason=" + reason
                     + " setting=" + Settings.Global.getInt(ctx.getContentResolver(), "vsr_value_from_gamecube", -1));
+
             if (!success) {
                 Object panel = XposedHelpers.getObjectField(controller, "q");
                 if (panel != null) XposedHelpers.callMethod(panel, "g", stored);
@@ -427,10 +424,24 @@ public final class GameUnlock implements IXposedHookLoadPackage {
             state.start((Context)XposedHelpers.getObjectField(p.thisObject, "mContext"));
         });
         backend("memc", "MEMC", "MEMC", "memc");
-        backend("sr", "VSR", "VSR", "vsr");
         genericMemcBackend();
+        genericVsrBackend();
         auditDispatch(service, "dispatchMEMCEnabled", "memc");
         auditDispatch(service, "dispatchVSREnabled", "vsr");
+    }
+
+    private void genericVsrBackend() {
+        String controller = "com.vivo.services.game.sr.VSRController";
+        hook(controller, "isVSRPostProcessingWhitelistApp", new Object[]{String.class}, null, p -> {
+            if (allowed((String)p.args[0], "vsr")
+                    && XposedHelpers.getStaticBooleanField(p.thisObject.getClass(), "SUPPORT_VSR_POST_PROCESSING"))
+                p.setResult(true);
+        });
+        hook("com.vivo.services.game.sr.VSRConfigParser", "supportVSRPostProcessingForCurrentModel",
+                new Object[]{String.class}, null, p -> {
+            if (allowed((String)p.args[0], "vsr") && Boolean.TRUE.equals(XposedHelpers.callStaticMethod(
+                    p.method.getDeclaringClass(), "supportVSRPostProcessing"))) p.setResult(true);
+        });
     }
 
     private void genericMemcBackend() {

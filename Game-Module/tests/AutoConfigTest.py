@@ -30,7 +30,17 @@ assert 'allApps' not in policy
 # system_server (package "android") has no data dir for SharedPreferences.
 assert '!"android".equals(ctx.getPackageName())' in runtime
 assert 'isUserUnlocked()' in runtime
-assert '"attach"' not in (java / 'GameUnlock.java').read_text(encoding='utf-8')
+hooks = (java / 'GameUnlock.java').read_text(encoding='utf-8')
+assert '"attach"' not in hooks
+# Generic games need the BufferQueue route, not package-specific shader managers.
+assert 'backend("sr", "VSR", "VSR", "vsr")' not in hooks
+assert '"isVSRPostProcessingWhitelistApp"' in hooks
+assert '"supportVSRPostProcessingForCurrentModel"' in hooks
+assert '"SUPPORT_VSR_POST_PROCESSING"' in hooks
+assert 'hook(controller, "isVSRFailedApp"' not in hooks
+assert 'callMethod(controller, "w1"' not in hooks
+assert 'callMethod(controller, "v1", ctx, pkg, mode == 1, false)' in hooks
+assert '!Double.isFinite(temperature)' in hooks
 android = '{http://schemas.android.com/apk/res/android}'
 app = ET.parse(root / 'app/src/main/AndroidManifest.xml').getroot().find('application')
 for name in ('.ConfigProvider', '.ConfigRequestReceiver'):

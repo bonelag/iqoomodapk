@@ -25,6 +25,7 @@ final class RuntimeState {
     static final Uri SUPPORT_GAMES = Uri.parse("content://com.vivo.gamecube.provider/support_game");
     private volatile Policy policy = closed();
     private volatile String packageList = "";
+    private volatile java.util.Map<String, Policy> profiles = Collections.emptyMap();
     private volatile boolean started;
     private Set<String> games = Collections.emptySet();
     private long lastGameScan;
@@ -36,7 +37,19 @@ final class RuntimeState {
         return new Policy(false, false, false, 120, Collections.<String>emptySet());
     }
     Policy policy() { return policy; }
+    Policy policy(String pkg) {
+        Policy selected = pkg == null ? null : profiles.get(pkg);
+        return selected == null ? policy : selected;
+    }
     String packages() { return packageList; }
+    String packages(String feature) {
+        java.util.List<String> selected = new java.util.ArrayList<>();
+        for (String pkg : policy.packages()) {
+            Policy p = policy(pkg);
+            if ("memc".equals(feature) ? p.memc : p.vsr) selected.add(pkg);
+        }
+        return android.text.TextUtils.join(";", selected);
+    }
 
     synchronized void start(Context context) {
         if (started || context == null) return;
@@ -70,6 +83,8 @@ final class RuntimeState {
                 else ctx.registerReceiver(receiver, filter, ConfigContract.PERMISSION, handler);
                 GameUnlock.log("CONFIG_RECEIVER_READY host=" + ctx.getPackageName());
             } catch (Throwable t) { GameUnlock.log("CONFIG_RECEIVER_ERROR: " + t); }
+            if ((android.app.Application.getProcessName() + "").startsWith("com.vivo.gamecube"))
+                registerGameCommands(ctx, handler);
             request(ctx);
             // system_server runs as package "android", which has no data directory for preferences.
             if (!"android".equals(ctx.getPackageName())) {
@@ -112,7 +127,7 @@ final class RuntimeState {
                     apply(ctx, b);
                     unavailableLogged = false;
                 } catch (Throwable t) {
-                    if (received == null) { policy = closed(); packageList = ""; }
+                    if (received == null) { policy = closed(); profiles = Collections.emptyMap(); packageList = ""; }
                     if (!unavailableLogged) {
                         GameUnlock.log("CONFIG_UNAVAILABLE host=" + ctx.getPackageName() + ": " + t);
                         unavailableLogged = true;
@@ -128,10 +143,65 @@ final class RuntimeState {
 
     private void request(Context ctx) {
         try {
-            ctx.sendBroadcast(new Intent().setComponent(new ComponentName(Policy.MODULE,
+            Intent request = new Intent().setComponent(new ComponentName(Policy.MODULE,
                     Policy.MODULE + ".ConfigRequestReceiver")).putExtra("target", ctx.getPackageName())
-                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND));
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            if (lastGameScan > 0) request.putExtra("game_count", games.size())
+                    .putExtra("games", android.text.TextUtils.join(";", games));
+            ctx.sendBroadcast(request);
         } catch (Throwable t) { GameUnlock.log("CONFIG_REQUEST_ERROR: " + t); }
+    }
+
+    private void registerGameCommands(Context ctx, Handler handler) {
+        ctx.registerReceiver(new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (intent == null || intent.getIntExtra("protocol", 0) != 1) return;
+                String id = intent.getStringExtra("request_id");
+                if (id == null || id.length() > 64) return;
+                String error = "";
+                try {
+                    String operation = intent.getStringExtra("operation");
+                    String pkg = intent.getStringExtra("package");
+                    if (!"list".equals(operation)) {
+                        if (pkg == null || pkg.length() > 256 || !pkg.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+                                || Policy.MODULE.equals(pkg)) throw new IllegalArgumentException("Invalid package");
+                        if ("add".equals(operation)) {
+                            ApplicationInfo ai = ctx.getPackageManager().getApplicationInfo(pkg, 0);
+                            if (!ai.enabled || ai.uid % 100000 < 10000 || (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0)
+                                throw new IllegalArgumentException("Only enabled user apps can be added");
+                            if (!hasGame(ctx, pkg)) {
+                                android.content.ContentValues values = new android.content.ContentValues();
+                                values.put("package_name", pkg);
+                                try { ctx.getContentResolver().insert(SUPPORT_GAMES, values); }
+                                catch (RuntimeException insertError) { if (!hasGame(ctx, pkg)) throw insertError; }
+                            }
+                        } else if ("remove".equals(operation)) {
+                            ctx.getContentResolver().delete(SUPPORT_GAMES, "package_name=?", new String[]{pkg});
+                        } else throw new IllegalArgumentException("Invalid operation");
+                        ctx.getContentResolver().notifyChange(SUPPORT_GAMES, null);
+                        if (hasGame(ctx, pkg) != "add".equals(operation)) throw new IllegalStateException("GameCube did not save the change");
+                    }
+                    lastGameScan = 0;
+                    scanGames(ctx);
+                    if (received != null) apply(ctx, received);
+                } catch (Exception failure) { error = failure.getClass().getSimpleName() + ": " + failure.getMessage(); }
+                Intent reply = new Intent().setComponent(new ComponentName(Policy.MODULE,
+                        Policy.MODULE + ".ConfigRequestReceiver"))
+                        .putExtra("target", ctx.getPackageName()).putExtra("game_result_id", id)
+                        .putExtra("game_error", error);
+                if (lastGameScan > 0) reply.putExtra("game_count", games.size())
+                        .putExtra("games", android.text.TextUtils.join(";", games));
+                ctx.sendBroadcast(reply);
+            }
+        }, new IntentFilter(ConfigContract.GAME_ACTION), ConfigContract.PERMISSION, handler, Context.RECEIVER_EXPORTED);
+    }
+
+    private boolean hasGame(Context ctx, String pkg) {
+        try (Cursor cursor = ctx.getContentResolver().query(SUPPORT_GAMES, new String[]{"package_name"},
+                "package_name=?", new String[]{pkg}, null)) {
+            if (cursor == null) throw new IllegalStateException("GameCube provider unavailable");
+            return cursor.moveToFirst();
+        }
     }
 
     /** Reads enabled games from GameCube; on any failure keeps the previous list. */
@@ -154,7 +224,20 @@ final class RuntimeState {
             }
             games = next;
             lastGameScan = SystemClock.elapsedRealtime();
+            pushGames(ctx);
         } catch (Throwable t) { GameUnlock.log("GAMES_SCAN_ERROR host=" + ctx.getPackageName() + ": " + t); }
+    }
+
+    /** Hands the freshly scanned list to the module app so its UI updates without a request. */
+    private void pushGames(Context ctx) {
+        if (!ctx.getPackageName().startsWith("com.vivo.gamecube")) return;
+        try {
+            ctx.sendBroadcast(new Intent().setComponent(new ComponentName(Policy.MODULE,
+                    Policy.MODULE + ".ConfigRequestReceiver")).putExtra("target", ctx.getPackageName())
+                    .putExtra("game_count", games.size())
+                    .putExtra("games", android.text.TextUtils.join(";", games))
+                    .addFlags(Intent.FLAG_RECEIVER_FOREGROUND));
+        } catch (Throwable t) { GameUnlock.log("GAMES_PUSH_ERROR: " + t); }
     }
 
     private void apply(Context ctx, Bundle b) {
@@ -165,6 +248,17 @@ final class RuntimeState {
         Collections.sort(names);
         String joined = android.text.TextUtils.join(";", names);
         boolean changed = !joined.equals(packageList) || policy.enabled != next.enabled;
+        java.util.Map<String, Policy> overrides = new java.util.HashMap<>();
+        try {
+            org.json.JSONObject json = new org.json.JSONObject(b.getString("profiles", "{}"));
+            for (String pkg : games) {
+                org.json.JSONObject entry = json.optJSONObject(pkg);
+                if (entry != null) overrides.put(pkg, new Policy(next.enabled,
+                        entry.optBoolean("memc", next.memc), entry.optBoolean("vsr", next.vsr),
+                        entry.optInt("target_fps", next.targetFps), games));
+            }
+        } catch (org.json.JSONException invalid) { GameUnlock.log("PROFILE_PARSE_ERROR " + invalid); }
+        profiles = Collections.unmodifiableMap(overrides);
         packageList = joined;
         policy = next;
         if (changed) GameUnlock.log("CONFIG_READY host=" + ctx.getPackageName() + " games=" + names + " target=" + next.targetFps);

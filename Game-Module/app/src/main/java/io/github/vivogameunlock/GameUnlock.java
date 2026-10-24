@@ -52,12 +52,13 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         if (!TARGET_FINGERPRINT.equals(Build.FINGERPRINT)) {
             once("rom", "UNSUPPORTED_ROM " + Build.FINGERPRINT); return;
         }
-        log("LOAD version=0.1.5 package=" + lp.packageName + " process=" + process);
+        log("LOAD version=0.1.6 package=" + lp.packageName + " process=" + process);
         if (("android".equals(lp.packageName) || "system".equals(lp.packageName))
                 && ("android".equals(process) || "system".equals(process) || "system_server".equals(process))) {
             systemHooks();
-        } else if (("com.vivo.gamecube".equals(lp.packageName) && !"com.vivo.gamecube:daemon".equals(process))
-                || "com.vivo.gamewatch".equals(lp.packageName)) {
+        } else if ("com.vivo.gamecube".equals(lp.packageName) || "com.vivo.gamewatch".equals(lp.packageName)) {
+            // Registered for every GameCube process including :daemon (the always-on provider host),
+            // so the game bridge stays reachable when the UI process is killed.
             hook(Application.class, "onCreate", new Object[]{}, null, p -> {
                 Context ctx = (Context)p.thisObject;
                 if (!lp.packageName.equals(ctx.getPackageName())) return;
@@ -65,6 +66,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
                 long expected = "com.vivo.gamecube".equals(lp.packageName) ? 1401000 : 250003;
                 if (code != expected) { once("version", "UNSUPPORTED_VERSION " + code); return; }
                 GameUnlock appSession = new GameUnlock(ctx.getClassLoader(), process);
+                if ("com.vivo.gamecube:daemon".equals(process)) { appSession.state.start(ctx); return; }
                 if ("com.vivo.gamecube".equals(lp.packageName)) appSession.cubeHooks(); else appSession.watchHooks();
                 appSession.state.start(ctx);
             });
@@ -100,7 +102,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         }
     }
     private boolean allowed(String pkg, String feature) {
-        Policy cfg = state.policy();
+        Policy cfg = state.policy(pkg);
         return cfg.allows(pkg) && ("memc".equals(feature) ? cfg.memc : "vsr".equals(feature) && cfg.vsr);
     }
     private String foreground() {
@@ -117,7 +119,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         for (String method : new String[]{"d0", "F0"}) {
             hook(util, method, new Object[]{function, String.class}, null, p -> {
                 if (Boolean.TRUE.equals(p.getResult()) || p.args[0] == null) return;
-                Policy cfg = state.policy();
+                Policy cfg = state.policy((String)p.args[1]);
                 if (cfg.allows((String)p.args[1]) && cfg.feature(((Enum<?>)p.args[0]).name())) p.setResult(true);
             });
         }
@@ -140,7 +142,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         }, p -> {
             if ((Integer)p.getResult() > 0 || p.args[0] == null || !allowed((String)p.args[1], "memc")) return;
             String mode = ((Enum<?>)p.args[0]).name();
-            if ("BOOST_FRAME".equals(mode)) p.setResult(state.policy().targetFps);
+            if ("BOOST_FRAME".equals(mode)) p.setResult(state.policy((String)p.args[1]).targetFps);
             else if ("OPTIMIZE_POWER_CONSUMPTION".equals(mode)) p.setResult(60);
         });
         hook("com.vivo.gameassistant.frameinterpolation.h", "J0", new Object[]{}, p -> {
@@ -178,11 +180,11 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         hook(Settings.Global.class, "getString", new Object[]{ContentResolver.class, String.class}, null, p -> {
             String key = (String)p.args[1];
             if (!state.policy().enabled || key == null || state.packages().isEmpty()) return;
-            boolean add = (state.policy().vsr && VSR_KEYS.contains(key))
-                    || (state.policy().memc && MEMC_KEYS.contains(key));
-            if (add) {
+            String additions = VSR_KEYS.contains(key) ? state.packages("vsr")
+                    : MEMC_KEYS.contains(key) ? state.packages("memc") : "";
+            if (!additions.isEmpty()) {
                 String original = (String)p.getResult();
-                p.setResult(original == null || original.isEmpty() ? state.packages() : original + ";" + state.packages());
+                p.setResult(original == null || original.isEmpty() ? additions : original + ";" + additions);
             }
         });
         hook("m9.j", "s", new Object[]{String.class}, null, p -> {
@@ -208,7 +210,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
             if (!allowed(pkg, "memc") || hasStockFrameProfile(pkg)) return;
             String mode = ((Enum<?>)p.args[4]).name();
             if ((!"OPTIMIZE_POWER_CONSUMPTION".equals(mode) && !"BOOST_FRAME".equals(mode)) || (Integer)p.args[2] <= 0) return;
-            int target = "OPTIMIZE_POWER_CONSUMPTION".equals(mode) ? 60 : state.policy().targetFps;
+            int target = "OPTIMIZE_POWER_CONSUMPTION".equals(mode) ? 60 : state.policy(pkg).targetFps;
             Object helper = XposedHelpers.callStaticMethod(XposedHelpers.findClass(
                     "com.vivo.gameassistant.frameinterpolation.i", loader), "e");
             XposedHelpers.callMethod(helper, "h", Policy.GPU_ROUTE, (Integer)p.args[2], target / 2, target);
@@ -335,7 +337,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
     private static final Set<String> VSR_KEYS = new HashSet<>(Arrays.asList(
             "vsr_whitelist_apps", "vsr_all_whitelist_apps", "vsr_gles_whitelist_apps", "vsr_vulkan_whitelist_apps"));
     private Object frameProfile(String pkg) {
-        int target = state.policy().targetFps;
+        int target = state.policy(pkg).targetFps;
         List<Object> boost = Collections.singletonList(XposedHelpers.newInstance(
                 XposedHelpers.findClass("s7.b", loader), target == 90 ? 60 : target/2, target/2, target));
         List<Object> power = Collections.singletonList(XposedHelpers.newInstance(
@@ -365,11 +367,11 @@ public final class GameUnlock implements IXposedHookLoadPackage {
         Class<?> service = XposedHelpers.findClass("com.vivo.gameassistant.AssistantUIService", loader);
         List<Object> original = (List<Object>)XposedHelpers.getStaticObjectField(service, "h");
         List<Object> list = original == null ? new ArrayList<>() : new ArrayList<>(original);
-        int target = state.policy().targetFps;
+        int target = state.policy(pkg).targetFps;
         list.removeIf(item -> {
             if (!syntheticFrames.contains(item)) return false;
             String name = (String)XposedHelpers.callMethod(item, "k");
-            return !allowed(name, "memc") || !Integer.valueOf(target).equals(frameTargets.get(name));
+            return !allowed(name, "memc") || !Integer.valueOf(state.policy(name).targetFps).equals(frameTargets.get(name));
         });
         if (allowed(pkg, "memc")) {
             boolean present = false;
@@ -477,7 +479,7 @@ public final class GameUnlock implements IXposedHookLoadPackage {
             int mode = (Integer)p.args[2];
             if (p.getResult() != null || !allowed(pkg, "memc") || (mode != 1 && mode != 2)) return;
             double temp = (Double)p.args[3];
-            int target = mode == 2 ? 60 : state.policy().targetFps;
+            int target = mode == 2 ? 60 : state.policy(pkg).targetFps;
             if (Policy.thermalStopped(genericOverheat.contains(pkg), temp)) genericOverheat.add(pkg);
             else genericOverheat.remove(pkg);
             boolean stopped = genericOverheat.contains(pkg);

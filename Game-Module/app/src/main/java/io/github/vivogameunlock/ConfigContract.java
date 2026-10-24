@@ -4,6 +4,7 @@ package io.github.vivogameunlock;
 public final class ConfigContract {
     public static final String ACTION = "io.github.vivogameunlock.CONFIG_V1";
     public static final String PERMISSION = "io.github.vivogameunlock.permission.CONFIG";
+    public static final String GAME_ACTION = "io.github.vivogameunlock.GAMES_V1";
     public static final String CACHE = "io.github.vivogameunlock.runtime_config";
     public static final String[] TARGETS = {"android", "com.vivo.gamecube", "com.vivo.gamewatch"};
     private ConfigContract() { }

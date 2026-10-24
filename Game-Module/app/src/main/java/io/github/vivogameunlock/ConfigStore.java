@@ -28,14 +28,38 @@ final class ConfigStore {
         for (String key : FLAGS) b.putBoolean(key, p.getBoolean(key, true));
         b.putInt("target_fps", p.getInt("target_fps", 120));
         b.putLong("revision", p.getLong("revision", 0));
+        b.putString("profiles", ConfigContract.limited(p.getString("profiles", "{}")));
         return b;
     }
     static void write(SharedPreferences p, Bundle b) {
         SharedPreferences.Editor e = p.edit().putBoolean("received", true);
         for (String key : FLAGS) e.putBoolean(key, b.getBoolean(key, true));
+        e.putString("profiles", ConfigContract.limited(b.getString("profiles", "{}")));
         e.putInt("target_fps", b.getInt("target_fps", 120))
                 .putLong("revision", b.getLong("revision", 0)).apply();
     }
+    static void captureDefaults(Context ctx, String games) {
+        SharedPreferences prefs;
+        try { prefs = preferences(ctx); }
+        catch (IllegalStateException locked) { return; } // runs again after the first unlock
+        try {
+            org.json.JSONObject profiles = new org.json.JSONObject(prefs.getString("profiles", "{}"));
+            boolean changed = false;
+            for (String pkg : games.split(";")) {
+                if (pkg.isEmpty() || profiles.has(pkg)) continue;
+                org.json.JSONObject profile = new org.json.JSONObject();
+                profile.put("memc", prefs.getBoolean("memc", true));
+                profile.put("vsr", prefs.getBoolean("vsr", true));
+                profile.put("target_fps", prefs.getInt("target_fps", 120));
+                profiles.put(pkg, profile);
+                changed = true;
+            }
+            if (changed) prefs.edit().putString("profiles", profiles.toString()).apply();
+        } catch (org.json.JSONException invalid) {
+            android.util.Log.w("CubeUnlocker", "Cannot save game defaults", invalid);
+        }
+    }
+
     static void publish(Context ctx) {
         // A user UI change only writes this module's own preferences and sends configuration.
         SharedPreferences p = preferences(ctx);
